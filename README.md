@@ -32,6 +32,34 @@ A bare-metal C project for the STM32F411CEU6 (Blackpill) development board, deve
 - **Flash (ST-Link):** `make flash-stlink`
 - **Flash (DFU):** `make flash-dfu`
 
+## Time Synchronization via UART
+
+The system clock can be synchronized by sending a specific 15-character string through the UART (USART1).
+
+**Command Format:** `TYYYYMMDDHHMMSS`
+- `T`: Header character
+- `YYYY`: Year (e.g., 2026)
+- `MM`: Month (01-12)
+- `DD`: Day (01-31)
+- `HH`: Hour (00-23)
+- `MM`: Minute (00-59)
+- `SS`: Second (00-59)
+
+**Example:**
+To set the time to April 24, 2026, at 14:30:00, send:
+`T20260424143000`
+
+The board will respond with `RTC Sync Successful!` and the logger will reflect the new time on the next heartbeat.
+
+## Commit Console Logs
+
+### Commit: 63c436a - Add README.md
+```text
+[24/04/2026 13:40:24] Heartbeat
+[24/04/2026 13:40:25] Heartbeat
+[24/04/2026 13:40:26] Heartbeat
+```
+
 ## Project History
 This project was developed iteratively using the **Gemini CLI** interactive agent. Every commit in the history reflects a verified step in the development lifecycle, from basic blinking to complex peripheral integration.
 
