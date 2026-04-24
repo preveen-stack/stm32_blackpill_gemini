@@ -173,6 +173,18 @@ void Log_ClockConfiguration(void) {
     Logger_Log("Measured SysClock: %lu.%06lu MHz", freq / 1000000, freq % 1000000);
 }
 
+void Print_Banner(void) {
+    printf("\r\n");
+    printf("****************************************************\r\n");
+    printf("*                                                  *\r\n");
+    printf("*         STM32 BLACKPILL F411 BAREMETAL           *\r\n");
+    printf("*                                                  *\r\n");
+    printf("*            Created using Gemini CLI              *\r\n");
+    printf("*                                                  *\r\n");
+    printf("****************************************************\r\n");
+    printf("\r\n");
+}
+
 static uint8_t to_bcd(uint8_t val) {
     return ((val / 10) << 4) | (val % 10);
 }
@@ -403,7 +415,7 @@ void Process_UART(void) {
 
 int main(void) {
     USART1_Init_16MHz();
-    printf("\r\n--- STM32F411 RTC Sync Ready ---\r\n");
+    Print_Banner();
     
     SystemClock_Config_96MHz();
     USART1_Init_96MHz();

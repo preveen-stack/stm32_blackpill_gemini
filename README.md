@@ -16,6 +16,7 @@ A bare-metal C project for the STM32F411CEU6 (Blackpill) development board, deve
 - **Multi-Channel ADC with DMA:** Background scanning of 11 channels (10 external pins + 1 internal temperature) using **DMA2 Stream 0**, ensuring zero CPU overhead for data acquisition.
 - **System Clock Measurement:** Accurately measure the actual CPU frequency using the RTC as a reference and log the clock tree configuration (PLL, Oscillators).
 - **PWM Generation:** Configured **TIM1 Channel 1 (PA8)** for 1kHz PWM output with variable duty cycle.
+- **Startup Banner:** Displays a stylized ASCII banner upon system reset.
 - **SysTick Timer:** Used for precise millisecond delays and system uptime tracking.
 
 ## Hardware Connections
@@ -100,9 +101,20 @@ The board will respond with `RTC Sync Successful!` and the logger will reflect t
 [24/04/2026 14:14:38] PWM Status: PA8 (TIM1_CH1) Duty: 20%
 ```
 
-### Commit: 90fc3f9 - Include PWM Frequency in UART log
+### Commit: a9d1111 - Include PWM Frequency in UART log
 ```text
 [24/04/2026 14:18:38] PWM Status: PA8 (TIM1_CH1) Duty: 40% | Freq: 1kHz
+```
+
+### Commit: 6515984 - Add Startup ASCII Banner
+```text
+****************************************************
+*                                                  *
+*         STM32 BLACKPILL F411 BAREMETAL           *
+*                                                  *
+*            Created using Gemini CLI              *
+*                                                  *
+****************************************************
 ```
 
 ## Project History
