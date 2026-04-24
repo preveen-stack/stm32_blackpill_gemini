@@ -14,7 +14,7 @@ A bare-metal C project for the STM32F411CEU6 (Blackpill) development board, deve
 - **UART Time Sync:** Synchronize the RTC by sending a 15-character command over UART: `TYYYYMMDDHHMMSS` (e.g., `T20260424134500`).
 - **Internal Temperature Sensor:** Periodically read and display the MCU's internal temperature via ADC1.
 - **Multi-Channel ADC with DMA:** Background scanning of 11 channels (10 external pins + 1 internal temperature) using **DMA2 Stream 0**, ensuring zero CPU overhead for data acquisition.
-- **System Clock Measurement:** Accurately measure the actual CPU frequency using the RTC as a reference and log the clock tree configuration (PLL, Oscillators) periodically.
+- **System Clock Measurement:** Accurately measure the actual CPU frequency using the RTC as a reference and log the full clock tree configuration (System Clock Source, PLL source, PLL parameters, Oscillator readiness) periodically.
 - **PWM Generation:** Configured **TIM1 Channel 1 (PA8)** for 1kHz PWM output with variable duty cycle.
 - **Startup Banner:** Displays a stylized ASCII banner upon system reset.
 - **SysTick Timer:** Used for precise millisecond delays and system uptime tracking.
@@ -125,6 +125,16 @@ The board will respond with `RTC Sync Successful!` and the logger will reflect t
 [24/04/2026 14:50:35] Ready: HSE:1 HSI:1 LSE:1 LSI:0
 [24/04/2026 14:50:36] Measured SysClock: 96.000000 MHz
 [24/04/2026 14:50:36] CPU Temp: 32.200 C
+```
+
+### Commit: 6699db7 - Detailed Clock Source Status
+```text
+[24/04/2026 15:04:54] --- System Status ---
+[24/04/2026 15:04:54] --- Clock Status ---
+[24/04/2026 15:04:54] System Clock (SWS): PLL
+[24/04/2026 15:04:54] PLL Source: HSE | PLL Config: M=25 N=192 P=2
+[24/04/2026 15:04:54] Oscillators Ready: HSE:1 HSI:1 LSE:1 LSI:0
+[24/04/2026 15:04:55] Measured SysClock: 96.000000 MHz
 ```
 
 ## Project History

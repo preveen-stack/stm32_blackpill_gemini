@@ -154,20 +154,28 @@ uint32_t Measure_SystemClock(void) {
 
 void Log_ClockConfiguration(void) {
     uint32_t pllcfgr = RCC_PLLCFGR;
+    uint32_t cfgr = RCC_CFGR;
     uint32_t m = pllcfgr & 0x3F;
     uint32_t n = (pllcfgr >> 6) & 0x1FF;
     uint32_t p = (((pllcfgr >> 16) & 0x3) + 1) * 2;
-    uint32_t src = (pllcfgr >> 22) & 0x1;
+    uint32_t pll_src = (pllcfgr >> 22) & 0x1;
+    uint32_t sws = (cfgr >> 2) & 0x3;
+
+    const char* sws_str = "Unknown";
+    if (sws == 0) sws_str = "HSI";
+    else if (sws == 1) sws_str = "HSE";
+    else if (sws == 2) sws_str = "PLL";
 
     Logger_Log("--- Clock Status ---");
-    Logger_Log("Source: %s | PLL: M=%lu N=%lu P=%lu", src ? "HSE" : "HSI", m, n, p);
+    Logger_Log("System Clock (SWS): %s", sws_str);
+    Logger_Log("PLL Source: %s | PLL Config: M=%lu N=%lu P=%lu", pll_src ? "HSE" : "HSI", m, n, p);
     
     uint32_t hse_rdy = (RCC_CR >> 17) & 1;
     uint32_t hsi_rdy = (RCC_CR >> 1) & 1;
     uint32_t lse_rdy = (RCC_BDCR >> 1) & 1;
     uint32_t lsi_rdy = (RCC_CSR >> 1) & 1;
     
-    Logger_Log("Ready: HSE:%d HSI:%d LSE:%d LSI:%d", hse_rdy, hsi_rdy, lse_rdy, lsi_rdy);
+    Logger_Log("Oscillators Ready: HSE:%d HSI:%d LSE:%d LSI:%d", hse_rdy, hsi_rdy, lse_rdy, lsi_rdy);
     
     uint32_t freq = Measure_SystemClock();
     Logger_Log("Measured SysClock: %lu.%06lu MHz", freq / 1000000, freq % 1000000);
