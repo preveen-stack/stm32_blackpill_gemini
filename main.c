@@ -8,6 +8,7 @@
 #define RCC_BASE        0x40023800
 #define FLASH_R_BASE    0x40023C00
 #define GPIOA_BASE      0x40020000
+#define GPIOB_BASE      0x40020400
 #define GPIOC_BASE      0x40020800
 #define USART1_BASE     0x40011000
 #define PWR_BASE        0x40007000
@@ -37,6 +38,7 @@
 #define FLASH_ACR       (*(volatile uint32_t *)(FLASH_R_BASE + 0x00))
 #define GPIOA_MODER     (*(volatile uint32_t *)(GPIOA_BASE + 0x00))
 #define GPIOA_AFRH      (*(volatile uint32_t *)(GPIOA_BASE + 0x24))
+#define GPIOB_MODER     (*(volatile uint32_t *)(GPIOB_BASE + 0x00))
 #define GPIOC_MODER     (*(volatile uint32_t *)(GPIOC_BASE + 0x00))
 #define GPIOC_ODR       (*(volatile uint32_t *)(GPIOC_BASE + 0x14))
 #define USART1_SR       (*(volatile uint32_t *)(USART1_BASE + 0x00))
@@ -51,6 +53,7 @@
 #define ADC1_CR1        (*(volatile uint32_t *)(ADC1_BASE + 0x04))
 #define ADC1_CR2        (*(volatile uint32_t *)(ADC1_BASE + 0x08))
 #define ADC1_SMPR1      (*(volatile uint32_t *)(ADC1_BASE + 0x0C))
+#define ADC1_SMPR2      (*(volatile uint32_t *)(ADC1_BASE + 0x10))
 #define ADC1_SQR3       (*(volatile uint32_t *)(ADC1_BASE + 0x34))
 #define ADC1_DR         (*(volatile uint32_t *)(ADC1_BASE + 0x4C))
 #define ADC_CCR         (*(volatile uint32_t *)(ADC_COMMON_BASE + 0x04))
@@ -145,18 +148,34 @@ void RTC_Init(void) {
 }
 
 void ADC_Init(void) {
+    RCC_AHB1ENR |= (1 << 0) | (1 << 1); // Enable GPIOA and GPIOB clocks
+    
+    /* Configure PA0-PA7 as Analog (11) */
+    GPIOA_MODER |= 0x0000FFFF; // Bits 0-15 set to 1
+    
+    /* Configure PB0-PB1 as Analog (11) */
+    GPIOB_MODER |= 0x0000000F; // Bits 0-3 set to 1
+
     RCC_APB2ENR |= (1 << 8);      // Enable ADC1 clock
     ADC_CCR |= (1 << 23);         // TSVREFE: Enable Temp sensor and VREFINT
-    ADC1_SMPR1 |= (7 << 24);      // Channel 18 sample time: 480 cycles
+    
+    /* Sample time: 480 cycles for all channels for stability */
+    ADC1_SMPR2 = 0x3FFFFFFF;      // Channels 0-9
+    ADC1_SMPR1 |= (7 << 24);      // Channel 18
+
     ADC1_CR2 |= (1 << 0);         // ADON: Turn on ADC
     delay_ms(1);                  // Wait for ADC to stabilize
 }
 
-int32_t ADC_ReadTemp(void) {
-    ADC1_SQR3 = 18;               // Select channel 18
+uint32_t ADC_Read(uint8_t channel) {
+    ADC1_SQR3 = channel;          // Select channel
     ADC1_CR2 |= (1 << 30);        // SWSTART
     while (!(ADC1_SR & (1 << 1))); // Wait for EOC
-    uint32_t val = ADC1_DR;
+    return ADC1_DR;
+}
+
+int32_t ADC_ReadTemp(void) {
+    uint32_t val = ADC_Read(18);
     
     /* Temp = ((VSENSE - V25) / Avg_Slope) + 25
        VSENSE = (val * 3300) / 4095 (in mV)
@@ -281,10 +300,21 @@ int main(void) {
     while (1) {
         Process_UART();
         
-        if ((ms_ticks - last_blink) >= 1000) {
+        if ((ms_ticks - last_blink) >= 2000) { // Slower heartbeat to read values
             GPIOC_ODR ^= (1 << 13);
             int32_t temp_mc = ADC_ReadTemp();
-            Logger_Log("Heartbeat | CPU Temp: %ld.%03ld C", temp_mc / 1000, temp_mc % 1000);
+            Logger_Log("--- System Status ---");
+            Logger_Log("CPU Temp: %ld.%03ld C", temp_mc / 1000, temp_mc % 1000);
+            
+            char adc_msg[128];
+            char *p = adc_msg;
+            p += sprintf(p, "ADC Pins: ");
+            for (int i = 0; i < 10; i++) {
+                uint32_t val = ADC_Read(i);
+                p += sprintf(p, "CH%d:%lu ", i, val);
+            }
+            Logger_Log("%s", adc_msg);
+            
             last_blink = ms_ticks;
         }
     }
