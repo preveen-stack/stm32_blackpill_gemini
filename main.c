@@ -63,16 +63,16 @@
 #define STK_LOAD        (*(volatile uint32_t *)0xE000E014)
 #define STK_VAL         (*(volatile uint32_t *)0xE000E018)
 
+/* DWT Registers for Cycle Counting */
+#define DWT_CTRL        (*(volatile uint32_t *)0xE0001000)
+#define DWT_CYCCNT      (*(volatile uint32_t *)0xE0001004)
+#define DEMCR           (*(volatile uint32_t *)0xE000EDFC)
+
 volatile uint32_t ms_ticks = 0;
 int rtc_ready = 0;
 
 void SysTick_Handler(void) {
     ms_ticks++;
-}
-
-void delay_ms(uint32_t ms) {
-    uint32_t start = ms_ticks;
-    while ((ms_ticks - start) < ms);
 }
 
 void Logger_Log(const char *fmt, ...) {
@@ -95,6 +95,55 @@ void Logger_Log(const char *fmt, ...) {
     vprintf(fmt, args);
     va_end(args);
     printf("\r\n");
+}
+
+void delay_ms(uint32_t ms) {
+    uint32_t start = ms_ticks;
+    while ((ms_ticks - start) < ms);
+}
+
+void DWT_Init(void) {
+    DEMCR |= (1 << 24); // Enable TRCENA
+    DWT_CYCCNT = 0;
+    DWT_CTRL |= (1 << 0); // Enable CYCCNT
+}
+
+uint32_t Measure_SystemClock(void) {
+    if (!rtc_ready) return 0;
+
+    /* Wait for RTC second boundary */
+    uint32_t start_tr = RTC_TR;
+    while (RTC_TR == start_tr);
+    
+    uint32_t start_cycles = DWT_CYCCNT;
+    
+    /* Wait for next RTC second */
+    start_tr = RTC_TR;
+    while (RTC_TR == start_tr);
+    
+    uint32_t end_cycles = DWT_CYCCNT;
+    return (end_cycles - start_cycles);
+}
+
+void Log_ClockConfiguration(void) {
+    uint32_t pllcfgr = RCC_PLLCFGR;
+    uint32_t m = pllcfgr & 0x3F;
+    uint32_t n = (pllcfgr >> 6) & 0x1FF;
+    uint32_t p = (((pllcfgr >> 16) & 0x3) + 1) * 2;
+    uint32_t src = (pllcfgr >> 22) & 0x1;
+
+    Logger_Log("--- Clock Status ---");
+    Logger_Log("Source: %s | PLL: M=%lu N=%lu P=%lu", src ? "HSE" : "HSI", m, n, p);
+    
+    uint32_t hse_rdy = (RCC_CR >> 17) & 1;
+    uint32_t hsi_rdy = (RCC_CR >> 1) & 1;
+    uint32_t lse_rdy = (RCC_BDCR >> 1) & 1;
+    uint32_t lsi_rdy = (RCC_CSR >> 1) & 1;
+    
+    Logger_Log("Ready: HSE:%d HSI:%d LSE:%d LSI:%d", hse_rdy, hsi_rdy, lse_rdy, lsi_rdy);
+    
+    uint32_t freq = Measure_SystemClock();
+    Logger_Log("Measured SysClock: %lu.%06lu MHz", freq / 1000000, freq % 1000000);
 }
 
 static uint8_t to_bcd(uint8_t val) {
@@ -290,7 +339,10 @@ int main(void) {
 
     RTC_Init();
     ADC_Init();
+    DWT_Init();
+
     Logger_Log("System online. Send TYYYYMMDDHHMMSS to sync time.");
+    Log_ClockConfiguration();
 
     RCC_AHB1ENR |= (1 << 2);
     GPIOC_MODER &= ~(3 << (13 * 2));

@@ -14,6 +14,7 @@ A bare-metal C project for the STM32F411CEU6 (Blackpill) development board, deve
 - **UART Time Sync:** Synchronize the RTC by sending a 15-character command over UART: `TYYYYMMDDHHMMSS` (e.g., `T20260424134500`).
 - **Internal Temperature Sensor:** Periodically read and display the MCU's internal temperature via ADC1.
 - **Multi-Channel ADC Reading:** Read all 10 available external ADC channels (PA0-PA7, PB0-PB1) and display their raw values.
+- **System Clock Measurement:** Accurately measure the actual CPU frequency using the RTC as a reference and log the clock tree configuration (PLL, Oscillators).
 - **SysTick Timer:** Used for precise millisecond delays and system uptime tracking.
 
 ## Hardware Connections
@@ -73,6 +74,14 @@ The board will respond with `RTC Sync Successful!` and the logger will reflect t
 [24/04/2026 13:54:20] --- System Status ---
 [24/04/2026 13:54:20] CPU Temp: 33.000 C
 [24/04/2026 13:54:20] ADC Pins: CH0:4095 CH1:1234 CH2:567 CH3:0 CH4:0 CH5:0 CH6:0 CH7:0 CH8:0 CH9:0
+```
+
+### Commit: 5995daa - Add System Clock Measurement
+```text
+[24/04/2026 13:59:12] --- Clock Status ---
+[24/04/2026 13:59:12] Source: HSE | PLL: M=25 N=192 P=2
+[24/04/2026 13:59:12] Ready: HSE:1 HSI:1 LSE:1 LSI:0
+[24/04/2026 13:59:13] Measured SysClock: 96.000000 MHz
 ```
 
 ## Project History
