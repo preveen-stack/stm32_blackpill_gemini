@@ -17,13 +17,16 @@ A bare-metal C project for the STM32F411CEU6 (Blackpill) development board, deve
 - **System Clock Measurement:** Accurately measure the actual CPU frequency using the RTC as a reference and log the full clock tree configuration (System Clock Source, PLL source, PLL parameters, Oscillator readiness) periodically.
 - **PWM Generation:** Configured **TIM1 Channel 1 (PA8)** for 1kHz PWM output with variable duty cycle.
 - **Startup Banner:** Displays a stylized ASCII banner upon system reset.
+- **Hardware CRC32 Benchmarking:** Benchmark and validate the hardware CRC peripheral against a software implementation, logging processing cycles and speedup ratios.
 - **SysTick Timer:** Used for precise millisecond delays and system uptime tracking.
 
 ## Hardware Connections
 
 - **USART1 TX:** PA9 -> RX of USB-UART Adapter
 - **USART1 RX:** PA10 -> TX of USB-UART Adapter
+- **PWM Output:** PA8 (TIM1_CH1)
 - **Onboard LED:** PC13 (Toggles every second as a heartbeat)
+- **Analog Inputs:** PA0-PA7, PB0-PB1
 
 ## Building and Flashing
 
@@ -58,32 +61,45 @@ The board will respond with `RTC Sync Successful!` and the logger will reflect t
 
 ## Commit Console Logs
 
-### Commit: 3ec8920 - Update README with Sync guide
+### Commit: 32912e2 - CRC Benchmarking and Validation
 ```text
-[24/04/2026 13:40:24] Heartbeat
-[24/04/2026 13:40:25] Heartbeat
-[24/04/2026 13:40:26] Heartbeat
+[24/04/2026 15:43:29] --- CRC Benchmark (1KB Data) ---
+[24/04/2026 15:43:29] HW CRC: 0x6E4461B2 (264 cycles)
+[24/04/2026 15:43:29] SW CRC: 0x6E4461B2 (12548 cycles)
+[24/04/2026 15:43:29] Speedup: 47.5 x
+[24/04/2026 15:43:29] Validation: SUCCESS
 ```
 
-### Commit: 29796e7 - Add Internal Temperature Sensor
+### Commit: c02119d - Detailed Clock Source Status
 ```text
-[24/04/2026 13:51:04] Heartbeat | CPU Temp: 33.000 C
-[24/04/2026 13:51:05] Heartbeat | CPU Temp: 33.400 C
+[24/04/2026 15:04:54] --- System Status ---
+[24/04/2026 15:04:54] --- Clock Status ---
+[24/04/2026 15:04:54] System Clock (SWS): PLL
+[24/04/2026 15:04:54] PLL Source: HSE | PLL Config: M=25 N=192 P=2
+[24/04/2026 15:04:54] Oscillators Ready: HSE:1 HSI:1 LSE:1 LSI:0
+[24/04/2026 15:04:55] Measured SysClock: 96.000000 MHz
 ```
 
-### Commit: a0534cc - Add Multi-Channel ADC Support
+### Commit: db40bdb - Enable periodic system clock frequency and configuration logging
 ```text
-[24/04/2026 13:54:20] --- System Status ---
-[24/04/2026 13:54:20] CPU Temp: 33.000 C
-[24/04/2026 13:54:20] ADC Pins: CH0:4095 CH1:1234 CH2:567 CH3:0 CH4:0 CH5:0 CH6:0 CH7:0 CH8:0 CH9:0
+[24/04/2026 14:50:35] --- System Status ---
+[24/04/2026 14:50:35] --- Clock Status ---
+[24/04/2026 14:50:35] Source: HSE | PLL: M=25 N=192 P=2
+[24/04/2026 14:50:35] Ready: HSE:1 HSI:1 LSE:1 LSI:0
+[24/04/2026 14:50:36] Measured SysClock: 96.000000 MHz
 ```
 
-### Commit: 1378f4c - Add System Clock Measurement
+### Commit: a9d1111 - Include PWM Frequency in UART log
 ```text
-[24/04/2026 13:59:12] --- Clock Status ---
-[24/04/2026 13:59:12] Source: HSE | PLL: M=25 N=192 P=2
-[24/04/2026 13:59:12] Ready: HSE:1 HSI:1 LSE:1 LSI:0
-[24/04/2026 13:59:13] Measured SysClock: 96.000000 MHz
+[24/04/2026 14:18:38] PWM Status: PA8 (TIM1_CH1) Duty: 40% | Freq: 1kHz
+```
+
+### Commit: 30f8d6c - Implement PWM generation using TIM1 on PA8
+```text
+[24/04/2026 14:14:38] --- System Status ---
+[24/04/2026 14:14:38] CPU Temp: 32.200 C
+[24/04/2026 14:14:38] ADC Pins: CH0:4095 CH1:4095 ...
+[24/04/2026 14:14:38] PWM Status: PA8 (TIM1_CH1) Duty: 20%
 ```
 
 ### Commit: d6e5c14 - Add ADC DMA Support
@@ -93,48 +109,11 @@ The board will respond with `RTC Sync Successful!` and the logger will reflect t
 [24/04/2026 14:04:34] ADC Pins: CH0:4095 CH1:1234 CH2:567 CH3:0 CH4:0 CH5:0 CH6:0 CH7:0 CH8:0 CH9:0
 ```
 
-### Commit: 3295cc8 - Add PWM Support
+### Commit: 3ec8920 - Update README with Sync guide
 ```text
-[24/04/2026 14:14:38] --- System Status ---
-[24/04/2026 14:14:38] CPU Temp: 32.200 C
-[24/04/2026 14:14:38] ADC Pins: CH0:4095 CH1:4095 ...
-[24/04/2026 14:14:38] PWM Status: PA8 (TIM1_CH1) Duty: 20%
-```
-
-### Commit: a9d1111 - Include PWM Frequency in UART log
-```text
-[24/04/2026 14:18:38] PWM Status: PA8 (TIM1_CH1) Duty: 40% | Freq: 1kHz
-```
-
-### Commit: aed616e - Add Startup ASCII Banner
-```text
-****************************************************
-*                                                  *
-*         STM32 BLACKPILL F411 BAREMETAL           *
-*                                                  *
-*            Created using Gemini CLI              *
-*                                                  *
-****************************************************
-```
-
-### Commit: 9c4172a - Periodic Clock Configuration Logging
-```text
-[24/04/2026 14:50:35] --- System Status ---
-[24/04/2026 14:50:35] --- Clock Status ---
-[24/04/2026 14:50:35] Source: HSE | PLL: M=25 N=192 P=2
-[24/04/2026 14:50:35] Ready: HSE:1 HSI:1 LSE:1 LSI:0
-[24/04/2026 14:50:36] Measured SysClock: 96.000000 MHz
-[24/04/2026 14:50:36] CPU Temp: 32.200 C
-```
-
-### Commit: 6699db7 - Detailed Clock Source Status
-```text
-[24/04/2026 15:04:54] --- System Status ---
-[24/04/2026 15:04:54] --- Clock Status ---
-[24/04/2026 15:04:54] System Clock (SWS): PLL
-[24/04/2026 15:04:54] PLL Source: HSE | PLL Config: M=25 N=192 P=2
-[24/04/2026 15:04:54] Oscillators Ready: HSE:1 HSI:1 LSE:1 LSI:0
-[24/04/2026 15:04:55] Measured SysClock: 96.000000 MHz
+[24/04/2026 13:40:24] Heartbeat
+[24/04/2026 13:40:25] Heartbeat
+[24/04/2026 13:40:26] Heartbeat
 ```
 
 ## Project History

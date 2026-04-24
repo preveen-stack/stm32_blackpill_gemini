@@ -68,6 +68,12 @@
 #define TIM1_CCR1       (*(volatile uint32_t *)(TIM1_BASE + 0x34))
 #define TIM1_BDTR       (*(volatile uint32_t *)(TIM1_BASE + 0x44))
 
+/* CRC Registers */
+#define CRC_BASE        0x40023000
+#define CRC_DR          (*(volatile uint32_t *)(CRC_BASE + 0x00))
+#define CRC_IDR         (*(volatile uint32_t *)(CRC_BASE + 0x04))
+#define CRC_CR_PERIPH   (*(volatile uint32_t *)(CRC_BASE + 0x08))
+
 /* DMA2 Registers */
 #define DMA2_BASE       0x40026400
 #define DMA2_S0CR       (*(volatile uint32_t *)(DMA2_BASE + 0x10))
@@ -331,6 +337,55 @@ void PWM_SetDutyCycle(uint16_t duty) {
     TIM1_CCR1 = (duty * 1000) / 100;
 }
 
+void CRC_Init(void) {
+    RCC_AHB1ENR |= (1 << 12); // CRCEN
+}
+
+uint32_t CRC_Hardware(uint32_t *data, uint32_t len) {
+    CRC_CR_PERIPH = 1; // Reset CRC
+    for (uint32_t i = 0; i < len; i++) {
+        CRC_DR = data[i];
+    }
+    return CRC_DR;
+}
+
+uint32_t CRC_Software(uint32_t *data, uint32_t len) {
+    uint32_t crc = 0xFFFFFFFF;
+    for (uint32_t i = 0; i < len; i++) {
+        crc ^= data[i];
+        for (int j = 0; j < 32; j++) {
+            if (crc & 0x80000000) crc = (crc << 1) ^ 0x04C11DB7;
+            else crc <<= 1;
+        }
+    }
+    return crc;
+}
+
+void Benchmark_CRC(void) {
+    uint32_t test_data[256];
+    for (int i = 0; i < 256; i++) test_data[i] = i * 0x12345678;
+
+    Logger_Log("--- CRC Benchmark (1KB Data) ---");
+
+    uint32_t start = DWT_CYCCNT;
+    uint32_t hw_crc = CRC_Hardware(test_data, 256);
+    uint32_t hw_cycles = DWT_CYCCNT - start;
+
+    start = DWT_CYCCNT;
+    uint32_t sw_crc = CRC_Software(test_data, 256);
+    uint32_t sw_cycles = DWT_CYCCNT - start;
+
+    Logger_Log("HW CRC: 0x%08lX (%lu cycles)", hw_crc, hw_cycles);
+    Logger_Log("SW CRC: 0x%08lX (%lu cycles)", sw_crc, sw_cycles);
+    Logger_Log("Speedup: %lu.%lu x", sw_cycles / hw_cycles, ((sw_cycles * 10) / hw_cycles) % 10);
+    
+    if (hw_crc == sw_crc) {
+        Logger_Log("Validation: SUCCESS");
+    } else {
+        Logger_Log("Validation: FAILED!");
+    }
+}
+
 void USART1_Init_Pins(void) {
     RCC_AHB1ENR |= (1 << 0);
     RCC_APB2ENR |= (1 << 4);
@@ -349,6 +404,7 @@ void USART1_Init_16MHz(void) {
 }
 
 void USART1_Init_96MHz(void) {
+    /* 96MHz / (16 * 115200) = 52.083 -> Mantissa 52, Fraction 1 */
     USART1_BRR = (52 << 4) | 1;
     USART1_CR1 = (1 << 13) | (1 << 3) | (1 << 2); // UE, TE, RE
 }
@@ -436,9 +492,11 @@ int main(void) {
     ADC_Init();
     DWT_Init();
     PWM_Init();
+    CRC_Init();
 
     Logger_Log("System online. Send TYYYYMMDDHHMMSS to sync time.");
     Log_ClockConfiguration();
+    Benchmark_CRC();
 
     RCC_AHB1ENR |= (1 << 2);
     GPIOC_MODER &= ~(3 << (13 * 2));
@@ -449,7 +507,7 @@ int main(void) {
     while (1) {
         Process_UART();
         
-        if ((ms_ticks - last_blink) >= 2000) { // Slower heartbeat to read values
+        if ((ms_ticks - last_blink) >= 5000) { // Benchmark every 5 seconds
             GPIOC_ODR ^= (1 << 13);
             Logger_Log("--- System Status ---");
             Log_ClockConfiguration();
@@ -469,6 +527,9 @@ int main(void) {
             duty = (duty + 20) % 110;
             PWM_SetDutyCycle(duty);
             Logger_Log("PWM Status: PA8 (TIM1_CH1) Duty: %d%% | Freq: 1kHz", duty);
+
+            /* Run CRC benchmark */
+            Benchmark_CRC();
             
             last_blink = ms_ticks;
         }
