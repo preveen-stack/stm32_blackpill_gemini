@@ -15,7 +15,7 @@ A bare-metal C project for the STM32F411CEU6 (Blackpill) development board, deve
 - **Internal Temperature Sensor:** Periodically read and display the MCU's internal temperature via ADC1.
 - **Multi-Channel ADC with DMA:** Background scanning of 11 channels (10 external pins + 1 internal temperature) using **DMA2 Stream 0**, ensuring zero CPU overhead for data acquisition.
 - **System Clock Measurement:** Accurately measure the actual CPU frequency using the RTC as a reference and log the full clock tree configuration (System Clock Source, PLL source, PLL parameters, Oscillator readiness) periodically.
-- **PWM Generation:** Configured **TIM1 Channel 1 (PA8)** for 1kHz PWM output with variable duty cycle.
+- **PWM Generation:** Configured **TIM1 Channel 1 (PA8)** for 375kHz PWM output with variable duty cycle.
 - **Startup Banner:** Displays a stylized ASCII banner upon system reset.
 - **Hardware CRC32 Benchmarking:** Benchmark and validate the hardware CRC peripheral against a software implementation, logging processing cycles and speedup ratios.
 - **Reset Reason Detection:** Detects and logs the cause of the last system reset (e.g., Pin Reset, Power-on Reset, Software Reset, Watchdog).
@@ -115,6 +115,11 @@ The board will respond with `RTC Sync Successful!` and the logger will reflect t
 ### Commit: a9d1111 - Include PWM Frequency in UART log
 ```text
 [24/04/2026 14:18:38] PWM Status: PA8 (TIM1_CH1) Duty: 40% | Freq: 1kHz
+```
+
+### Commit: f049529 - Increase PWM Frequency to 375kHz
+```text
+[24/04/2026 16:18:43] PWM Status: PA8 (TIM1_CH1) Duty: 60% | Freq: 375kHz
 ```
 
 ### Commit: 30f8d6c - Implement PWM generation using TIM1 on PA8

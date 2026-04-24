@@ -334,9 +334,11 @@ void PWM_Init(void) {
     GPIOA_AFRH  &= ~(0xF << (0 * 4)); // Clear AF for PA8
     GPIOA_AFRH  |=  (1 << (0 * 4));   // AF1
 
-    /* 3. Configure TIM1 for PWM */
-    TIM1_PSC = 95;           // Clock = 96MHz / 96 = 1MHz
-    TIM1_ARR = 1000;         // Frequency = 1MHz / 1000 = 1kHz
+    /* 3. Configure TIM1 for PWM 
+       Frequency = 96MHz / (0+1) / (255+1) = 375kHz
+    */
+    TIM1_PSC = 0;
+    TIM1_ARR = 255;
     TIM1_CCR1 = 0;           // Initial Duty Cycle = 0%
 
     /* PWM mode 1, preload enable */
@@ -351,7 +353,8 @@ void PWM_Init(void) {
 
 void PWM_SetDutyCycle(uint16_t duty) {
     if (duty > 100) duty = 100;
-    TIM1_CCR1 = (duty * 1000) / 100;
+    /* ARR is 255 */
+    TIM1_CCR1 = (duty * 255) / 100;
 }
 
 void CRC_Init(void) {
@@ -625,7 +628,7 @@ int main(void) {
             /* Vary PWM duty cycle */
             duty = (duty + 20) % 110;
             PWM_SetDutyCycle(duty);
-            Logger_Log("PWM Status: PA8 (TIM1_CH1) Duty: %d%% | Freq: 1kHz", duty);
+            Logger_Log("PWM Status: PA8 (TIM1_CH1) Duty: %d%% | Freq: 375kHz", duty);
 
             /* Run benchmarks */
             Benchmark_CRC();
