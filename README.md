@@ -100,6 +100,11 @@ The board will respond with `RTC Sync Successful!` and the logger will reflect t
 [24/04/2026 14:14:38] PWM Status: PA8 (TIM1_CH1) Duty: 20%
 ```
 
+### Commit: 90fc3f9 - Include PWM Frequency in UART log
+```text
+[24/04/2026 14:18:38] PWM Status: PA8 (TIM1_CH1) Duty: 40% | Freq: 1kHz
+```
+
 ## Project History
 This project was developed iteratively using the **Gemini CLI** interactive agent. Every commit in the history reflects a verified step in the development lifecycle, from basic blinking to complex peripheral integration.
 

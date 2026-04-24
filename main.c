@@ -447,7 +447,7 @@ int main(void) {
             /* Vary PWM duty cycle */
             duty = (duty + 20) % 110;
             PWM_SetDutyCycle(duty);
-            Logger_Log("PWM Status: PA8 (TIM1_CH1) Duty: %d%%", duty);
+            Logger_Log("PWM Status: PA8 (TIM1_CH1) Duty: %d%% | Freq: 1kHz", duty);
             
             last_blink = ms_ticks;
         }
