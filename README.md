@@ -14,7 +14,7 @@ A bare-metal C project for the STM32F411CEU6 (Blackpill) development board, deve
 - **UART Time Sync:** Synchronize the RTC by sending a 15-character command over UART: `TYYYYMMDDHHMMSS` (e.g., `T20260424134500`).
 - **Internal Temperature Sensor:** Periodically read and display the MCU's internal temperature via ADC1.
 - **Multi-Channel ADC with DMA:** Background scanning of 11 channels (10 external pins + 1 internal temperature) using **DMA2 Stream 0**, ensuring zero CPU overhead for data acquisition.
-- **System Clock Measurement:** Accurately measure the actual CPU frequency using the RTC as a reference and log the clock tree configuration (PLL, Oscillators).
+- **System Clock Measurement:** Accurately measure the actual CPU frequency using the RTC as a reference and log the clock tree configuration (PLL, Oscillators) periodically.
 - **PWM Generation:** Configured **TIM1 Channel 1 (PA8)** for 1kHz PWM output with variable duty cycle.
 - **Startup Banner:** Displays a stylized ASCII banner upon system reset.
 - **SysTick Timer:** Used for precise millisecond delays and system uptime tracking.
@@ -106,7 +106,7 @@ The board will respond with `RTC Sync Successful!` and the logger will reflect t
 [24/04/2026 14:18:38] PWM Status: PA8 (TIM1_CH1) Duty: 40% | Freq: 1kHz
 ```
 
-### Commit: 6515984 - Add Startup ASCII Banner
+### Commit: aed616e - Add Startup ASCII Banner
 ```text
 ****************************************************
 *                                                  *
@@ -115,6 +115,16 @@ The board will respond with `RTC Sync Successful!` and the logger will reflect t
 *            Created using Gemini CLI              *
 *                                                  *
 ****************************************************
+```
+
+### Commit: 9c4172a - Periodic Clock Configuration Logging
+```text
+[24/04/2026 14:50:35] --- System Status ---
+[24/04/2026 14:50:35] --- Clock Status ---
+[24/04/2026 14:50:35] Source: HSE | PLL: M=25 N=192 P=2
+[24/04/2026 14:50:35] Ready: HSE:1 HSI:1 LSE:1 LSI:0
+[24/04/2026 14:50:36] Measured SysClock: 96.000000 MHz
+[24/04/2026 14:50:36] CPU Temp: 32.200 C
 ```
 
 ## Project History

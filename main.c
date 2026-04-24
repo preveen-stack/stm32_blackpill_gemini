@@ -443,8 +443,9 @@ int main(void) {
         
         if ((ms_ticks - last_blink) >= 2000) { // Slower heartbeat to read values
             GPIOC_ODR ^= (1 << 13);
-            int32_t temp_mc = ADC_ReadTemp();
             Logger_Log("--- System Status ---");
+            Log_ClockConfiguration();
+            int32_t temp_mc = ADC_ReadTemp();
             Logger_Log("CPU Temp: %ld.%03ld C", temp_mc / 1000, temp_mc % 1000);
             
             char adc_msg[128];
