@@ -9,35 +9,39 @@ extern uint32_t _ebss;
 
 void Reset_Handler(void);
 void Default_Handler(void);
+void SysTick_Handler(void);
 extern int main(void);
 
 /* Minimal vector table */
 __attribute__((section(".isr_vector")))
 uint32_t vectors[] = {
-    (uint32_t)&_estack,      /* Stack pointer */
-    (uint32_t)&Reset_Handler /* Reset handler */
+    (uint32_t)&_estack,      /* 0: Stack pointer */
+    (uint32_t)&Reset_Handler, /* 1: Reset handler */
+    (uint32_t)&Default_Handler, /* 2: NMI */
+    (uint32_t)&Default_Handler, /* 3: HardFault */
+    (uint32_t)&Default_Handler, /* 4: MemManage */
+    (uint32_t)&Default_Handler, /* 5: BusFault */
+    (uint32_t)&Default_Handler, /* 6: UsageFault */
+    0, 0, 0, 0,             /* 7-10: Reserved */
+    (uint32_t)&Default_Handler, /* 11: SVCall */
+    (uint32_t)&Default_Handler, /* 12: DebugMonitor */
+    0,                      /* 13: Reserved */
+    (uint32_t)&Default_Handler, /* 14: PendSV */
+    (uint32_t)&SysTick_Handler  /* 15: SysTick */
 };
 
 void Reset_Handler(void) {
-    /* Copy .data from Flash to RAM */
-    uint32_t size = (uint32_t)&_edata - (uint32_t)&_sdata;
-    uint8_t *pDst = (uint8_t *)&_sdata;
-    uint8_t *pSrc = (uint8_t *)&_la_data;
-    for (uint32_t i = 0; i < size; i++) {
+    uint32_t *pSrc = (uint32_t *)&_la_data;
+    uint32_t *pDst = (uint32_t *)&_sdata;
+    while (pDst < (uint32_t *)&_edata) {
         *pDst++ = *pSrc++;
     }
-
-    /* Initialize .bss with zero */
-    size = (uint32_t)&_ebss - (uint32_t)&_sbss;
-    pDst = (uint8_t *)&_sbss;
-    for (uint32_t i = 0; i < size; i++) {
+    pDst = (uint32_t *)&_sbss;
+    while (pDst < (uint32_t *)&_ebss) {
         *pDst++ = 0;
     }
 
-    /* Call main */
     main();
-
-    /* Infinite loop if main returns */
     while (1);
 }
 
