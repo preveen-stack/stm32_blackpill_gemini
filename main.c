@@ -44,6 +44,17 @@
 #define USART1_BRR      (*(volatile uint32_t *)(USART1_BASE + 0x08))
 #define USART1_CR1      (*(volatile uint32_t *)(USART1_BASE + 0x0C))
 
+/* ADC Registers */
+#define ADC1_BASE       0x40012000
+#define ADC_COMMON_BASE 0x40012300
+#define ADC1_SR         (*(volatile uint32_t *)(ADC1_BASE + 0x00))
+#define ADC1_CR1        (*(volatile uint32_t *)(ADC1_BASE + 0x04))
+#define ADC1_CR2        (*(volatile uint32_t *)(ADC1_BASE + 0x08))
+#define ADC1_SMPR1      (*(volatile uint32_t *)(ADC1_BASE + 0x0C))
+#define ADC1_SQR3       (*(volatile uint32_t *)(ADC1_BASE + 0x34))
+#define ADC1_DR         (*(volatile uint32_t *)(ADC1_BASE + 0x4C))
+#define ADC_CCR         (*(volatile uint32_t *)(ADC_COMMON_BASE + 0x04))
+
 /* SysTick */
 #define STK_CTRL        (*(volatile uint32_t *)0xE000E010)
 #define STK_LOAD        (*(volatile uint32_t *)0xE000E014)
@@ -131,6 +142,30 @@ void RTC_Init(void) {
     RTC_ISR &= ~(1 << 7);
     RTC_WPR = 0xFF;
     rtc_ready = 1;
+}
+
+void ADC_Init(void) {
+    RCC_APB2ENR |= (1 << 8);      // Enable ADC1 clock
+    ADC_CCR |= (1 << 23);         // TSVREFE: Enable Temp sensor and VREFINT
+    ADC1_SMPR1 |= (7 << 24);      // Channel 18 sample time: 480 cycles
+    ADC1_CR2 |= (1 << 0);         // ADON: Turn on ADC
+    delay_ms(1);                  // Wait for ADC to stabilize
+}
+
+int32_t ADC_ReadTemp(void) {
+    ADC1_SQR3 = 18;               // Select channel 18
+    ADC1_CR2 |= (1 << 30);        // SWSTART
+    while (!(ADC1_SR & (1 << 1))); // Wait for EOC
+    uint32_t val = ADC1_DR;
+    
+    /* Temp = ((VSENSE - V25) / Avg_Slope) + 25
+       VSENSE = (val * 3300) / 4095 (in mV)
+       V25 = 760 mV, Avg_Slope = 2.5 mV/C
+       Temp_mC = (VSENSE - 760) * 400 + 25000
+    */
+    int32_t vsense_mv = (val * 3300) / 4095;
+    int32_t temp_mc = (vsense_mv - 760) * 400 + 25000;
+    return temp_mc;
 }
 
 void USART1_Init_Pins(void) {
@@ -235,6 +270,7 @@ int main(void) {
     STK_CTRL = 0x07;
 
     RTC_Init();
+    ADC_Init();
     Logger_Log("System online. Send TYYYYMMDDHHMMSS to sync time.");
 
     RCC_AHB1ENR |= (1 << 2);
@@ -247,7 +283,8 @@ int main(void) {
         
         if ((ms_ticks - last_blink) >= 1000) {
             GPIOC_ODR ^= (1 << 13);
-            Logger_Log("Heartbeat");
+            int32_t temp_mc = ADC_ReadTemp();
+            Logger_Log("Heartbeat | CPU Temp: %ld.%03ld C", temp_mc / 1000, temp_mc % 1000);
             last_blink = ms_ticks;
         }
     }

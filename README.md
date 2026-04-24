@@ -12,6 +12,7 @@ A bare-metal C project for the STM32F411CEU6 (Blackpill) development board, deve
     - Full date and time support.
 - **Timestamped Logger:** Custom `Logger_Log` function that prepends every message with an RTC-sourced datetimestamp: `[DD/MM/YYYY HH:MM:SS]`.
 - **UART Time Sync:** Synchronize the RTC by sending a 15-character command over UART: `TYYYYMMDDHHMMSS` (e.g., `T20260424134500`).
+- **Internal Temperature Sensor:** Periodically read and display the MCU's internal temperature via ADC1.
 - **SysTick Timer:** Used for precise millisecond delays and system uptime tracking.
 
 ## Hardware Connections
@@ -53,11 +54,17 @@ The board will respond with `RTC Sync Successful!` and the logger will reflect t
 
 ## Commit Console Logs
 
-### Commit: 63c436a - Add README.md
+### Commit: 3ec8920 - Update README with Sync guide
 ```text
 [24/04/2026 13:40:24] Heartbeat
 [24/04/2026 13:40:25] Heartbeat
 [24/04/2026 13:40:26] Heartbeat
+```
+
+### Commit: 610d971 - Add Internal Temperature Sensor
+```text
+[24/04/2026 13:51:04] Heartbeat | CPU Temp: 33.000 C
+[24/04/2026 13:51:05] Heartbeat | CPU Temp: 33.400 C
 ```
 
 ## Project History
