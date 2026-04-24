@@ -1,6 +1,8 @@
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <stdarg.h>
+#include <string.h>
 
 /* Register addresses */
 #define RCC_BASE        0x40023800
@@ -81,105 +83,149 @@ void Logger_Log(const char *fmt, ...) {
     printf("\r\n");
 }
 
-void RTC_Init(void) {
-    /* 1. Enable Power Clock and Access to Backup Domain */
-    RCC_APB1ENR |= (1 << 28); // PWREN
-    PWR_CR |= (1 << 8);       // DBP: Disable Backup Domain protection
+static uint8_t to_bcd(uint8_t val) {
+    return ((val / 10) << 4) | (val % 10);
+}
 
-    /* 2. Enable LSE and wait for it to be ready. 
-       Fallback to LSI if LSE crystal is not present or fails to start. */
-    RCC_BDCR |= (1 << 0);     // LSEON
-    uint32_t timeout = 0xFFFFF;
-    while (!(RCC_BDCR & (1 << 1)) && --timeout); // Wait for LSERDY
-
-    uint32_t prediv_a, prediv_s;
-
-    if (RCC_BDCR & (1 << 1)) {
-        /* LSE Ready */
-        RCC_BDCR |= (1 << 8); // RTCSEL = LSE
-        prediv_a = 127;
-        prediv_s = 255;
-    } else {
-        /* LSE Failed, fall back to LSI */
-        RCC_CSR |= (1 << 0);  // LSION
-        while (!(RCC_CSR & (1 << 1))); // Wait for LSIRDY
-        RCC_BDCR &= ~(3 << 8);
-        RCC_BDCR |=  (2 << 8); // RTCSEL = LSI
-        prediv_a = 127;
-        prediv_s = 249; // 32000 / 128 = 250 -> 250-1
-    }
-
-    /* 3. Enable RTC Clock */
-    RCC_BDCR |= (1 << 15); // RTCEN
-
-    /* 4. Enter Init Mode */
+void RTC_SetDateTime(uint8_t y, uint8_t mon, uint8_t d, uint8_t h, uint8_t min, uint8_t s) {
     RTC_WPR = 0xCA;
     RTC_WPR = 0x53;
     RTC_ISR |= (1 << 7); // INIT
-    while (!(RTC_ISR & (1 << 6))); // INITF
+    while (!(RTC_ISR & (1 << 6)));
 
-    /* 5. Set Prescalers */
-    RTC_PRER = (prediv_a << 16) | prediv_s;
+    RTC_TR = (to_bcd(h) << 16) | (to_bcd(min) << 8) | to_bcd(s);
+    RTC_DR = (to_bcd(y) << 16) | (to_bcd(mon) << 8) | to_bcd(d);
 
-    /* 6. Set Time and Date (April 24, 2026, 13:30:00) */
-    RTC_TR = (0x1 << 20) | (0x3 << 16) | (0x3 << 12) | (0x0 << 8) | (0x0 << 4) | 0x0;
-    RTC_DR = (0x2 << 20) | (0x6 << 16) | (0x5 << 13) | (0x0 << 12) | (0x4 << 8) | (0x2 << 4) | 0x4;
-
-    /* 7. Exit Init Mode */
     RTC_ISR &= ~(1 << 7);
-    RTC_WPR = 0xFF; // Re-enable protection
+    RTC_WPR = 0xFF;
+}
 
+void RTC_Init(void) {
+    RCC_APB1ENR |= (1 << 28);
+    PWR_CR |= (1 << 8);
+
+    RCC_BDCR |= (1 << 0);
+    uint32_t timeout = 0xFFFFF;
+    while (!(RCC_BDCR & (1 << 1)) && --timeout);
+
+    uint32_t prediv_a, prediv_s;
+    if (RCC_BDCR & (1 << 1)) {
+        RCC_BDCR |= (1 << 8);
+        prediv_a = 127;
+        prediv_s = 255;
+    } else {
+        RCC_CSR |= (1 << 0);
+        while (!(RCC_CSR & (1 << 1)));
+        RCC_BDCR &= ~(3 << 8);
+        RCC_BDCR |=  (2 << 8);
+        prediv_a = 127;
+        prediv_s = 249;
+    }
+
+    RCC_BDCR |= (1 << 15);
+    RTC_WPR = 0xCA;
+    RTC_WPR = 0x53;
+    RTC_ISR |= (1 << 7);
+    while (!(RTC_ISR & (1 << 6)));
+    RTC_PRER = (prediv_a << 16) | prediv_s;
+    RTC_ISR &= ~(1 << 7);
+    RTC_WPR = 0xFF;
     rtc_ready = 1;
 }
 
-void USART1_Init_16MHz(void) {
+void USART1_Init_Pins(void) {
     RCC_AHB1ENR |= (1 << 0);
     RCC_APB2ENR |= (1 << 4);
-    GPIOA_MODER &= ~(3 << (9 * 2));
-    GPIOA_MODER |=  (2 << (9 * 2));
-    GPIOA_AFRH  &= ~(0xF << (1 * 4));
-    GPIOA_AFRH  |=  (7 << (1 * 4));
+    
+    /* PA9 (TX), PA10 (RX) -> AF7 */
+    GPIOA_MODER &= ~((3 << (9 * 2)) | (3 << (10 * 2)));
+    GPIOA_MODER |=  ((2 << (9 * 2)) | (2 << (10 * 2)));
+    GPIOA_AFRH  &= ~((0xF << (1 * 4)) | (0xF << (2 * 4)));
+    GPIOA_AFRH  |=  ((7 << (1 * 4)) | (7 << (2 * 4)));
+}
+
+void USART1_Init_16MHz(void) {
+    USART1_Init_Pins();
     USART1_BRR = (8 << 4) | 11;
-    USART1_CR1 = (1 << 13) | (1 << 3);
+    USART1_CR1 = (1 << 13) | (1 << 3) | (1 << 2); // UE, TE, RE
 }
 
 void USART1_Init_96MHz(void) {
     USART1_BRR = (52 << 4) | 1;
-    USART1_CR1 = (1 << 13) | (1 << 3);
+    USART1_CR1 = (1 << 13) | (1 << 3) | (1 << 2); // UE, TE, RE
 }
 
 void SystemClock_Config_96MHz(void) {
-    RCC_CR |= (1 << 16); // HSEON
+    RCC_CR |= (1 << 16);
     uint32_t timeout = 0xFFFF;
     while (!(RCC_CR & (1 << 17)) && --timeout);
     int use_hse = (RCC_CR & (1 << 17));
-
     FLASH_ACR = (1 << 8) | (1 << 9) | (1 << 10) | 3;
-
     uint32_t pllm = use_hse ? 25 : 16;
     uint32_t plln = 192;
     uint32_t pllp = 0;
     RCC_PLLCFGR = (pllm << 0) | (plln << 6) | (pllp << 16) | (use_hse ? (1 << 22) : (0 << 22));
-
-    RCC_CR |= (1 << 24); // PLLON
+    RCC_CR |= (1 << 24);
     while (!(RCC_CR & (1 << 25)));
-
     RCC_CFGR |= (0 << 4) | (4 << 10) | (0 << 13);
     RCC_CFGR |= (2 << 0);
     while ((RCC_CFGR & (3 << 2)) != (2 << 2));
 }
 
+void uart_putc(char c) {
+    while (!(USART1_SR & (1 << 7)));
+    USART1_DR = c;
+}
+
 int _write(int file, char *ptr, int len) {
     for (int i = 0; i < len; i++) {
-        while (!(USART1_SR & (1 << 7)));
-        USART1_DR = ptr[i];
+        uart_putc(ptr[i]);
     }
     return len;
 }
 
+char rx_buffer[32];
+int rx_index = 0;
+
+void Process_UART(void) {
+    while (USART1_SR & (1 << 5)) { // RXNE
+        char c = USART1_DR;
+        /* Echo back for debugging */
+        uart_putc(c); 
+        
+        if (c == '\r' || c == '\n') {
+            rx_buffer[rx_index] = '\0';
+            if (rx_index == 15 && rx_buffer[0] == 'T') {
+                /* Format: TYYYYMMDDHHMMSS */
+                int y, mon, d, h, m, s;
+                char tmp[5];
+                
+                tmp[0] = rx_buffer[1]; tmp[1] = rx_buffer[2]; tmp[2] = rx_buffer[3]; tmp[3] = rx_buffer[4]; tmp[4] = '\0';
+                y = atoi(tmp) - 2000;
+                tmp[0] = rx_buffer[5]; tmp[1] = rx_buffer[6]; tmp[2] = '\0';
+                mon = atoi(tmp);
+                tmp[0] = rx_buffer[7]; tmp[1] = rx_buffer[8]; tmp[2] = '\0';
+                d = atoi(tmp);
+                tmp[0] = rx_buffer[9]; tmp[1] = rx_buffer[10]; tmp[2] = '\0';
+                h = atoi(tmp);
+                tmp[0] = rx_buffer[11]; tmp[1] = rx_buffer[12]; tmp[2] = '\0';
+                m = atoi(tmp);
+                tmp[0] = rx_buffer[13]; tmp[1] = rx_buffer[14]; tmp[2] = '\0';
+                s = atoi(tmp);
+
+                RTC_SetDateTime(y, mon, d, h, m, s);
+                Logger_Log("RTC Sync Successful!");
+            }
+            rx_index = 0;
+        } else if (rx_index < 31) {
+            rx_buffer[rx_index++] = c;
+        }
+    }
+}
+
 int main(void) {
     USART1_Init_16MHz();
-    printf("\r\n--- STM32F411 Blackpill Booting ---\r\n");
+    printf("\r\n--- STM32F411 RTC Sync Ready ---\r\n");
     
     SystemClock_Config_96MHz();
     USART1_Init_96MHz();
@@ -188,19 +234,21 @@ int main(void) {
     STK_VAL = 0;
     STK_CTRL = 0x07;
 
-    Logger_Log("System Clock set to 96MHz.");
-    
     RTC_Init();
-    Logger_Log("RTC Initialized using %s.", (RCC_BDCR & (1 << 1)) ? "LSE (32.768kHz)" : "LSI (32kHz)");
+    Logger_Log("System online. Send TYYYYMMDDHHMMSS to sync time.");
 
     RCC_AHB1ENR |= (1 << 2);
     GPIOC_MODER &= ~(3 << (13 * 2));
     GPIOC_MODER |=  (1 << (13 * 2));
 
-    uint32_t count = 0;
+    uint32_t last_blink = 0;
     while (1) {
-        GPIOC_ODR ^= (1 << 13);
-        delay_ms(1000);
-        Logger_Log("Blink count: %lu", ++count);
+        Process_UART();
+        
+        if ((ms_ticks - last_blink) >= 1000) {
+            GPIOC_ODR ^= (1 << 13);
+            Logger_Log("Heartbeat");
+            last_blink = ms_ticks;
+        }
     }
 }
