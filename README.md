@@ -15,6 +15,7 @@ A bare-metal C project for the STM32F411CEU6 (Blackpill) development board, deve
 - **Internal Temperature Sensor:** Periodically read and display the MCU's internal temperature via ADC1.
 - **Multi-Channel ADC with DMA:** Background scanning of 11 channels (10 external pins + 1 internal temperature) using **DMA2 Stream 0**, ensuring zero CPU overhead for data acquisition.
 - **System Clock Measurement:** Accurately measure the actual CPU frequency using the RTC as a reference and log the clock tree configuration (PLL, Oscillators).
+- **PWM Generation:** Configured **TIM1 Channel 1 (PA8)** for 1kHz PWM output with variable duty cycle.
 - **SysTick Timer:** Used for precise millisecond delays and system uptime tracking.
 
 ## Hardware Connections
@@ -84,11 +85,19 @@ The board will respond with `RTC Sync Successful!` and the logger will reflect t
 [24/04/2026 13:59:13] Measured SysClock: 96.000000 MHz
 ```
 
-### Commit: 5a05f97 - Add ADC DMA Support
+### Commit: d6e5c14 - Add ADC DMA Support
 ```text
 [24/04/2026 14:04:34] --- System Status ---
 [24/04/2026 14:04:34] CPU Temp: 32.600 C
 [24/04/2026 14:04:34] ADC Pins: CH0:4095 CH1:1234 CH2:567 CH3:0 CH4:0 CH5:0 CH6:0 CH7:0 CH8:0 CH9:0
+```
+
+### Commit: 3295cc8 - Add PWM Support
+```text
+[24/04/2026 14:14:38] --- System Status ---
+[24/04/2026 14:14:38] CPU Temp: 32.200 C
+[24/04/2026 14:14:38] ADC Pins: CH0:4095 CH1:4095 ...
+[24/04/2026 14:14:38] PWM Status: PA8 (TIM1_CH1) Duty: 20%
 ```
 
 ## Project History

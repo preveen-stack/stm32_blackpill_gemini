@@ -58,6 +58,16 @@
 #define ADC1_DR         (*(volatile uint32_t *)(ADC1_BASE + 0x4C))
 #define ADC_CCR         (*(volatile uint32_t *)(ADC_COMMON_BASE + 0x04))
 
+/* TIM1 Registers (Advanced Control Timer for PWM) */
+#define TIM1_BASE       0x40010000
+#define TIM1_CR1        (*(volatile uint32_t *)(TIM1_BASE + 0x00))
+#define TIM1_CCMR1      (*(volatile uint32_t *)(TIM1_BASE + 0x18))
+#define TIM1_CCER       (*(volatile uint32_t *)(TIM1_BASE + 0x20))
+#define TIM1_PSC        (*(volatile uint32_t *)(TIM1_BASE + 0x28))
+#define TIM1_ARR        (*(volatile uint32_t *)(TIM1_BASE + 0x2C))
+#define TIM1_CCR1       (*(volatile uint32_t *)(TIM1_BASE + 0x34))
+#define TIM1_BDTR       (*(volatile uint32_t *)(TIM1_BASE + 0x44))
+
 /* DMA2 Registers */
 #define DMA2_BASE       0x40026400
 #define DMA2_S0CR       (*(volatile uint32_t *)(DMA2_BASE + 0x10))
@@ -270,6 +280,37 @@ int32_t ADC_ReadTemp(void) {
     return temp_mc;
 }
 
+void PWM_Init(void) {
+    /* 1. Enable TIM1 and GPIOA clocks */
+    RCC_APB2ENR |= (1 << 0); // TIM1EN
+    RCC_AHB1ENR |= (1 << 0); // GPIOAEN
+
+    /* 2. Configure PA8 as Alternate Function AF1 (TIM1_CH1) */
+    GPIOA_MODER &= ~(3 << (8 * 2));
+    GPIOA_MODER |=  (2 << (8 * 2)); // AF mode
+    GPIOA_AFRH  &= ~(0xF << (0 * 4)); // Clear AF for PA8
+    GPIOA_AFRH  |=  (1 << (0 * 4));   // AF1
+
+    /* 3. Configure TIM1 for PWM */
+    TIM1_PSC = 95;           // Clock = 96MHz / 96 = 1MHz
+    TIM1_ARR = 1000;         // Frequency = 1MHz / 1000 = 1kHz
+    TIM1_CCR1 = 0;           // Initial Duty Cycle = 0%
+
+    /* PWM mode 1, preload enable */
+    TIM1_CCMR1 = (6 << 4) | (1 << 3); 
+    /* Enable output on CH1 */
+    TIM1_CCER |= (1 << 0);
+    /* MOE: Main Output Enable (Required for TIM1) */
+    TIM1_BDTR |= (1 << 15);
+    /* Enable counter */
+    TIM1_CR1 |= (1 << 0);
+}
+
+void PWM_SetDutyCycle(uint16_t duty) {
+    if (duty > 100) duty = 100;
+    TIM1_CCR1 = (duty * 1000) / 100;
+}
+
 void USART1_Init_Pins(void) {
     RCC_AHB1ENR |= (1 << 0);
     RCC_APB2ENR |= (1 << 4);
@@ -374,6 +415,7 @@ int main(void) {
     RTC_Init();
     ADC_Init();
     DWT_Init();
+    PWM_Init();
 
     Logger_Log("System online. Send TYYYYMMDDHHMMSS to sync time.");
     Log_ClockConfiguration();
@@ -383,6 +425,7 @@ int main(void) {
     GPIOC_MODER |=  (1 << (13 * 2));
 
     uint32_t last_blink = 0;
+    uint16_t duty = 0;
     while (1) {
         Process_UART();
         
@@ -400,6 +443,11 @@ int main(void) {
                 p += sprintf(p, "CH%d:%lu ", i, val);
             }
             Logger_Log("%s", adc_msg);
+
+            /* Vary PWM duty cycle */
+            duty = (duty + 20) % 110;
+            PWM_SetDutyCycle(duty);
+            Logger_Log("PWM Status: PA8 (TIM1_CH1) Duty: %d%%", duty);
             
             last_blink = ms_ticks;
         }
