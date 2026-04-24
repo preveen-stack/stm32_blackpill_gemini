@@ -62,10 +62,14 @@ void delay_ms(uint32_t ms) {
 void Logger_Log(const char *fmt, ...) {
     if (rtc_ready) {
         uint32_t tr = RTC_TR;
+        uint32_t dr = RTC_DR;
         int h = ((tr >> 20) & 0x3) * 10 + ((tr >> 16) & 0xF);
         int m = ((tr >> 12) & 0x7) * 10 + ((tr >> 8) & 0xF);
         int s = ((tr >> 4) & 0x7) * 10 + (tr & 0xF);
-        printf("[%02d:%02d:%02d] ", h, m, s);
+        int y = ((dr >> 20) & 0xF) * 10 + ((dr >> 16) & 0xF);
+        int mon = ((dr >> 12) & 0x1) * 10 + ((dr >> 8) & 0xF);
+        int d = ((dr >> 4) & 0x3) * 10 + (dr & 0xF);
+        printf("[%02d/%02d/20%02d %02d:%02d:%02d] ", d, mon, y, h, m, s);
     } else {
         printf("[%lu ms] ", ms_ticks);
     }
@@ -116,7 +120,11 @@ void RTC_Init(void) {
     /* 5. Set Prescalers */
     RTC_PRER = (prediv_a << 16) | prediv_s;
 
-    /* 6. Exit Init Mode */
+    /* 6. Set Time and Date (April 24, 2026, 13:30:00) */
+    RTC_TR = (0x1 << 20) | (0x3 << 16) | (0x3 << 12) | (0x0 << 8) | (0x0 << 4) | 0x0;
+    RTC_DR = (0x2 << 20) | (0x6 << 16) | (0x5 << 13) | (0x0 << 12) | (0x4 << 8) | (0x2 << 4) | 0x4;
+
+    /* 7. Exit Init Mode */
     RTC_ISR &= ~(1 << 7);
     RTC_WPR = 0xFF; // Re-enable protection
 
