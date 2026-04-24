@@ -96,6 +96,7 @@
 #define DWT_CTRL        (*(volatile uint32_t *)0xE0001000)
 #define DWT_CYCCNT      (*(volatile uint32_t *)0xE0001004)
 #define DEMCR           (*(volatile uint32_t *)0xE000EDFC)
+#define CPACR           (*(volatile uint32_t *)0xE000ED88)
 
 volatile uint32_t ms_ticks = 0;
 int rtc_ready = 0;
@@ -341,6 +342,84 @@ void CRC_Init(void) {
     RCC_AHB1ENR |= (1 << 12); // CRCEN
 }
 
+void FPU_Enable(void) {
+    /* Set bits 20-23 to enable CP10 and CP11 coprocessors */
+    CPACR |= ((3UL << 10*2) | (3UL << 11*2));
+}
+
+float DotProduct_F32(float *a, float *b, uint32_t len) {
+    float sum = 0.0f;
+    for (uint32_t i = 0; i < len; i++) {
+        sum += a[i] * b[i];
+    }
+    return sum;
+}
+
+int32_t DotProduct_I16_Standard(int16_t *a, int16_t *b, uint32_t len) {
+    int32_t sum = 0;
+    for (uint32_t i = 0; i < len; i++) {
+        sum += (int32_t)a[i] * (int32_t)b[i];
+    }
+    return sum;
+}
+
+/* Using Inline Assembly for Cortex-M4 SIMD (SMLAD) */
+int32_t DotProduct_I16_SIMD(int16_t *a, int16_t *b, uint32_t len) {
+    int32_t sum = 0;
+    uint32_t *pA = (uint32_t *)a;
+    uint32_t *pB = (uint32_t *)b;
+    uint32_t num_blocks = len / 2;
+
+    for (uint32_t i = 0; i < num_blocks; i++) {
+        uint32_t valA = *pA++;
+        uint32_t valB = *pB++;
+        /* SMLAD sum, valA, valB, sum */
+        __asm volatile ("smlad %0, %1, %2, %0" : "+r" (sum) : "r" (valA), "r" (valB));
+    }
+    return sum;
+}
+
+void Benchmark_DSP(void) {
+    #define DSP_LEN 256
+    float fa[DSP_LEN], fb[DSP_LEN];
+    int16_t ia[DSP_LEN], ib[DSP_LEN];
+
+    for (int i = 0; i < DSP_LEN; i++) {
+        fa[i] = (float)i * 0.123f;
+        fb[i] = (float)i * 0.456f;
+        ia[i] = (int16_t)i;
+        ib[i] = (int16_t)(i % 127);
+    }
+
+    Logger_Log("--- DSP Benchmark (%d elements) ---", DSP_LEN);
+
+    /* FPU Benchmark */
+    uint32_t start = DWT_CYCCNT;
+    float f_res = DotProduct_F32(fa, fb, DSP_LEN);
+    uint32_t f_cycles = DWT_CYCCNT - start;
+    Logger_Log("F32 DotProduct: %ld (%lu cycles)", (int32_t)f_res, f_cycles);
+
+    /* I16 Standard Benchmark */
+    start = DWT_CYCCNT;
+    int32_t i_res_std = DotProduct_I16_Standard(ia, ib, DSP_LEN);
+    uint32_t i_cycles_std = DWT_CYCCNT - start;
+    Logger_Log("I16 Standard MAC: %ld (%lu cycles)", i_res_std, i_cycles_std);
+
+    /* I16 SIMD Benchmark */
+    start = DWT_CYCCNT;
+    int32_t i_res_simd = DotProduct_I16_SIMD(ia, ib, DSP_LEN);
+    uint32_t i_cycles_simd = DWT_CYCCNT - start;
+    Logger_Log("I16 SIMD (SMLAD): %ld (%lu cycles)", i_res_simd, i_cycles_simd);
+
+    Logger_Log("SIMD Speedup: %lu.%lu x", i_cycles_std / i_cycles_simd, ((i_cycles_std * 10) / i_cycles_simd) % 10);
+    
+    if (i_res_std == i_res_simd) {
+        Logger_Log("DSP Validation: SUCCESS");
+    } else {
+        Logger_Log("DSP Validation: FAILED!");
+    }
+}
+
 uint32_t CRC_Hardware(uint32_t *data, uint32_t len) {
     CRC_CR_PERIPH = 1; // Reset CRC
     for (uint32_t i = 0; i < len; i++) {
@@ -478,6 +557,7 @@ void Process_UART(void) {
 }
 
 int main(void) {
+    FPU_Enable();
     USART1_Init_16MHz();
     Print_Banner();
     
@@ -497,6 +577,7 @@ int main(void) {
     Logger_Log("System online. Send TYYYYMMDDHHMMSS to sync time.");
     Log_ClockConfiguration();
     Benchmark_CRC();
+    Benchmark_DSP();
 
     RCC_AHB1ENR |= (1 << 2);
     GPIOC_MODER &= ~(3 << (13 * 2));
@@ -528,8 +609,9 @@ int main(void) {
             PWM_SetDutyCycle(duty);
             Logger_Log("PWM Status: PA8 (TIM1_CH1) Duty: %d%% | Freq: 1kHz", duty);
 
-            /* Run CRC benchmark */
+            /* Run benchmarks */
             Benchmark_CRC();
+            Benchmark_DSP();
             
             last_blink = ms_ticks;
         }
