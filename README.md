@@ -18,6 +18,7 @@ A bare-metal C project for the STM32F411CEU6 (Blackpill) development board, deve
 - **PWM Generation:** Configured **TIM1 Channel 1 (PA8)** for 1kHz PWM output with variable duty cycle.
 - **Startup Banner:** Displays a stylized ASCII banner upon system reset.
 - **Hardware CRC32 Benchmarking:** Benchmark and validate the hardware CRC peripheral against a software implementation, logging processing cycles and speedup ratios.
+- **Reset Reason Detection:** Detects and logs the cause of the last system reset (e.g., Pin Reset, Power-on Reset, Software Reset, Watchdog).
 - **DSP Benchmarking (FPU & SIMD):** 
     - Benchmarks 32-bit floating point performance using the on-chip **FPU**.
     - Benchmarks 16-bit integer **SIMD (Single Instruction Multiple Data)** using the `SMLAD` instruction.
@@ -74,7 +75,7 @@ The board will respond with `RTC Sync Successful!` and the logger will reflect t
 [24/04/2026 15:43:29] Validation: SUCCESS
 ```
 
-### Commit: d90a8f0 - Add DSP Benchmarking (FPU and SIMD)
+### Commit: 0d22fc2 - Add DSP Benchmarking (FPU and SIMD)
 ```text
 [24/04/2026 16:05:10] --- DSP Benchmark (256 elements) ---
 [24/04/2026 16:05:10] F32 DotProduct: 313410 (4356 cycles)
@@ -82,6 +83,14 @@ The board will respond with `RTC Sync Successful!` and the logger will reflect t
 [24/04/2026 16:05:10] I16 SIMD (SMLAD): 1374528 (2054 cycles)
 [24/04/2026 16:05:10] SIMD Speedup: 2.6 x
 [24/04/2026 16:05:10] DSP Validation: SUCCESS
+```
+
+### Commit: 61563e0 - Add Reset Reason Detection
+```text
+[24/04/2026 16:07:27] --- System Status ---
+[24/04/2026 16:07:27] Reset Reason: Pin Reset (NRST)
+[24/04/2026 16:07:27] --- Clock Status ---
+[24/04/2026 16:07:27] System Clock (SWS): PLL
 ```
 
 ### Commit: c02119d - Detailed Clock Source Status

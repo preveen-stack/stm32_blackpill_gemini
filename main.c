@@ -100,6 +100,22 @@
 
 volatile uint32_t ms_ticks = 0;
 int rtc_ready = 0;
+char reset_reason[32] = "Unknown";
+
+void Detect_ResetReason(void) {
+    uint32_t csr = RCC_CSR;
+
+    if (csr & (1 << 26)) strcpy(reset_reason, "Pin Reset (NRST)");
+    else if (csr & (1 << 27)) strcpy(reset_reason, "Power-on Reset (POR)");
+    else if (csr & (1 << 28)) strcpy(reset_reason, "Software Reset");
+    else if (csr & (1 << 29)) strcpy(reset_reason, "IWDG Reset");
+    else if (csr & (1 << 30)) strcpy(reset_reason, "WWDG Reset");
+    else if (csr & (1 << 31)) strcpy(reset_reason, "Low-power Reset");
+    else strcpy(reset_reason, "Other/Unknown");
+
+    /* Clear reset flags */
+    RCC_CSR |= (1 << 24); // RMVF
+}
 
 /* ADC DMA Buffer: 10 external channels + 1 internal temperature */
 #define ADC_CHANNELS 11
@@ -557,6 +573,7 @@ void Process_UART(void) {
 }
 
 int main(void) {
+    Detect_ResetReason();
     FPU_Enable();
     USART1_Init_16MHz();
     Print_Banner();
@@ -591,6 +608,7 @@ int main(void) {
         if ((ms_ticks - last_blink) >= 5000) { // Benchmark every 5 seconds
             GPIOC_ODR ^= (1 << 13);
             Logger_Log("--- System Status ---");
+            Logger_Log("Reset Reason: %s", reset_reason);
             Log_ClockConfiguration();
             int32_t temp_mc = ADC_ReadTemp();
             Logger_Log("CPU Temp: %ld.%03ld C", temp_mc / 1000, temp_mc % 1000);
