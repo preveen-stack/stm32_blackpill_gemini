@@ -58,6 +58,19 @@
 #define ADC1_DR         (*(volatile uint32_t *)(ADC1_BASE + 0x4C))
 #define ADC_CCR         (*(volatile uint32_t *)(ADC_COMMON_BASE + 0x04))
 
+/* DMA2 Registers */
+#define DMA2_BASE       0x40026400
+#define DMA2_S0CR       (*(volatile uint32_t *)(DMA2_BASE + 0x10))
+#define DMA2_S0NDTR     (*(volatile uint32_t *)(DMA2_BASE + 0x14))
+#define DMA2_S0PAR      (*(volatile uint32_t *)(DMA2_BASE + 0x18))
+#define DMA2_S0M0AR     (*(volatile uint32_t *)(DMA2_BASE + 0x1C))
+#define DMA2_LISR       (*(volatile uint32_t *)(DMA2_BASE + 0x00))
+#define DMA2_LIFCR      (*(volatile uint32_t *)(DMA2_BASE + 0x08))
+
+/* ADC SQR Registers */
+#define ADC1_SQR1       (*(volatile uint32_t *)(ADC1_BASE + 0x2C))
+#define ADC1_SQR2       (*(volatile uint32_t *)(ADC1_BASE + 0x30))
+
 /* SysTick */
 #define STK_CTRL        (*(volatile uint32_t *)0xE000E010)
 #define STK_LOAD        (*(volatile uint32_t *)0xE000E014)
@@ -70,6 +83,10 @@
 
 volatile uint32_t ms_ticks = 0;
 int rtc_ready = 0;
+
+/* ADC DMA Buffer: 10 external channels + 1 internal temperature */
+#define ADC_CHANNELS 11
+volatile uint16_t adc_results[ADC_CHANNELS];
 
 void SysTick_Handler(void) {
     ms_ticks++;
@@ -198,39 +215,56 @@ void RTC_Init(void) {
 
 void ADC_Init(void) {
     RCC_AHB1ENR |= (1 << 0) | (1 << 1); // Enable GPIOA and GPIOB clocks
+    RCC_AHB1ENR |= (1 << 22);           // Enable DMA2 clock
     
-    /* Configure PA0-PA7 as Analog (11) */
-    GPIOA_MODER |= 0x0000FFFF; // Bits 0-15 set to 1
+    /* Configure PA0-PA7 as Analog */
+    GPIOA_MODER |= 0x0000FFFF;
     
-    /* Configure PB0-PB1 as Analog (11) */
-    GPIOB_MODER |= 0x0000000F; // Bits 0-3 set to 1
+    /* Configure PB0-PB1 as Analog */
+    GPIOB_MODER |= 0x0000000F;
 
     RCC_APB2ENR |= (1 << 8);      // Enable ADC1 clock
-    ADC_CCR |= (1 << 23);         // TSVREFE: Enable Temp sensor and VREFINT
-    
-    /* Sample time: 480 cycles for all channels for stability */
+    ADC_CCR |= (1 << 23);         // TSVREFE: Enable Temp sensor
+
+    /* ADC Configuration: Scan Mode, Continuous Conversion */
+    ADC1_CR1 |= (1 << 8);         // SCAN: Scan mode
+    ADC1_CR2 |= (1 << 1);         // CONT: Continuous conversion
+    ADC1_CR2 |= (1 << 8);         // DMA: Enable DMA
+    ADC1_CR2 |= (1 << 9);         // DDS: DMA disable selection (keep DMA on)
+
+    /* Sample time: 480 cycles for all channels */
     ADC1_SMPR2 = 0x3FFFFFFF;      // Channels 0-9
     ADC1_SMPR1 |= (7 << 24);      // Channel 18
 
+    /* Sequence: CH0, CH1, CH2, CH3, CH4, CH5, CH6, CH7, CH8, CH9, CH18 */
+    ADC1_SQR1 = ((ADC_CHANNELS - 1) << 20); // L = 11 conversions
+    ADC1_SQR3 = (0 << 0) | (1 << 5) | (2 << 10) | (3 << 15) | (4 << 20) | (5 << 25);
+    ADC1_SQR2 = (6 << 0) | (7 << 5) | (8 << 10) | (9 << 15) | (18 << 20);
+
+    /* DMA2 Stream 0 Configuration (ADC1 is on Stream 0 Channel 0 or Stream 4 Channel 0) */
+    DMA2_S0CR &= ~(1 << 0);       // Disable DMA Stream 0 to configure
+    while (DMA2_S0CR & (1 << 0)); // Wait for disable
+
+    DMA2_S0PAR = (uint32_t)&ADC1_DR;
+    DMA2_S0M0AR = (uint32_t)adc_results;
+    DMA2_S0NDTR = ADC_CHANNELS;
+
+    /* Channel 0, High priority, 16-bit memory & peripheral, Memory increment, Circular mode, Enable */
+    DMA2_S0CR = (0 << 25) | (2 << 16) | (1 << 13) | (1 << 11) | (1 << 10) | (1 << 8) | (1 << 0);
+
     ADC1_CR2 |= (1 << 0);         // ADON: Turn on ADC
-    delay_ms(1);                  // Wait for ADC to stabilize
+    delay_ms(1);
+    ADC1_CR2 |= (1 << 30);        // SWSTART: Start first conversion
 }
 
 uint32_t ADC_Read(uint8_t channel) {
-    ADC1_SQR3 = channel;          // Select channel
-    ADC1_CR2 |= (1 << 30);        // SWSTART
-    while (!(ADC1_SR & (1 << 1))); // Wait for EOC
-    return ADC1_DR;
+    if (channel < 10) return adc_results[channel];
+    if (channel == 18) return adc_results[10];
+    return 0;
 }
 
 int32_t ADC_ReadTemp(void) {
     uint32_t val = ADC_Read(18);
-    
-    /* Temp = ((VSENSE - V25) / Avg_Slope) + 25
-       VSENSE = (val * 3300) / 4095 (in mV)
-       V25 = 760 mV, Avg_Slope = 2.5 mV/C
-       Temp_mC = (VSENSE - 760) * 400 + 25000
-    */
     int32_t vsense_mv = (val * 3300) / 4095;
     int32_t temp_mc = (vsense_mv - 760) * 400 + 25000;
     return temp_mc;
