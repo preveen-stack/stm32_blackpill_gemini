@@ -41,12 +41,18 @@ SECTIONS
     .bss :
     {
         _sbss = .;
+        __bss_start__ = _sbss;
         *(.bss)
         *(.bss*)
         *(COMMON)
         . = ALIGN(4);
         _ebss = .;
+        __bss_end__ = _ebss;
     } > RAM
+
+    . = ALIGN(4);
+    end = .;
+    __end__ = .;
 
     /* Stack starts at end of RAM */
     _estack = ORIGIN(RAM) + LENGTH(RAM);

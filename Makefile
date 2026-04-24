@@ -1,7 +1,7 @@
 CC = arm-none-eabi-gcc
 OBJCOPY = arm-none-eabi-objcopy
 CFLAGS = -mcpu=cortex-m4 -mthumb -O0 -g -Wall
-LDFLAGS = -T stm32f411.ld -nostdlib
+LDFLAGS = -T stm32f411.ld --specs=nano.specs --specs=nosys.specs
 
 all: blink.bin
 
