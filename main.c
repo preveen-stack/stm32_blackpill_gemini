@@ -86,7 +86,8 @@ void RTC_Init(void) {
     RCC_APB1ENR |= (1 << 28); // PWREN
     PWR_CR |= (1 << 8);       // DBP: Disable Backup Domain protection
 
-    /* 2. Enable LSE and wait for it to be ready */
+    /* 2. Enable LSE and wait for it to be ready. 
+       Fallback to LSI if LSE crystal is not present or fails to start. */
     RCC_BDCR |= (1 << 0);     // LSEON
     uint32_t timeout = 0xFFFFF;
     while (!(RCC_BDCR & (1 << 1)) && --timeout); // Wait for LSERDY
