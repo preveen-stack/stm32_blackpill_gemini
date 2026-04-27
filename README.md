@@ -12,6 +12,7 @@ A bare-metal C project for the STM32F411CEU6 (Blackpill) development board, deve
     - Full date and time support.
 - **Timestamped Logger:** Custom `Logger_Log` function that prepends every message with an RTC-sourced datetimestamp: `[DD/MM/YYYY HH:MM:SS]`.
 - **UART Time Sync:** Synchronize the RTC by sending a 15-character command over UART: `TYYYYMMDDHHMMSS` (e.g., `T20260424134500`).
+- **UART System Reset:** Remotely trigger a system reboot by sending the string `RESET` over UART.
 - **Internal Temperature Sensor:** Periodically read and display the MCU's internal temperature via ADC1.
 - **Multi-Channel ADC with DMA:** Background scanning of 11 channels (10 external pins + 1 internal temperature) using **DMA2 Stream 0**, ensuring zero CPU overhead for data acquisition.
 - **System Clock Measurement:** Accurately measure the actual CPU frequency using the RTC as a reference and log the full clock tree configuration (System Clock Source, PLL source, PLL parameters, Oscillator readiness) periodically.
@@ -65,6 +66,13 @@ To set the time to April 24, 2026, at 14:30:00, send:
 The board will respond with `RTC Sync Successful!` and the logger will reflect the new time on the next heartbeat.
 
 ## Commit Console Logs
+
+### Commit: 6fe9553 - Add UART System Reset
+```text
+[27/04/2026 14:21:05] --- Periodic Status ---
+[27/04/2026 14:21:05] Reset Reason: Software Reset
+[27/04/2026 14:21:05] --- Clock Status ---
+```
 
 ### Commit: 32912e2 - CRC Benchmarking and Validation
 ```text

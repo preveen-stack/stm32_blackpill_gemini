@@ -97,6 +97,7 @@
 #define DWT_CYCCNT      (*(volatile uint32_t *)0xE0001004)
 #define DEMCR           (*(volatile uint32_t *)0xE000EDFC)
 #define CPACR           (*(volatile uint32_t *)0xE000ED88)
+#define SCB_AIRCR       (*(volatile uint32_t *)0xE000ED0C)
 
 volatile uint32_t ms_ticks = 0;
 int rtc_ready = 0;
@@ -484,6 +485,51 @@ void Benchmark_CRC(void) {
     }
 }
 
+uint32_t Get_SystemClock(void) {
+    uint32_t sws = (RCC_CFGR >> 2) & 0x3;
+    if (sws == 0) return 16000000; // HSI
+    if (sws == 1) return 25000000; // HSE
+    if (sws == 2) return 96000000; // PLL
+    return 16000000;
+}
+
+void SystemClock_Config_96MHz(void) {
+    /* 1. Try to enable HSE */
+    RCC_CR |= (1 << 16); // HSEON
+    uint32_t timeout = 1000000;
+    while (!(RCC_CR & (1 << 17)) && --timeout);
+
+    int use_hse = (RCC_CR & (1 << 17));
+
+    /* 2. Configure Flash */
+    FLASH_ACR = (1 << 8) | (1 << 9) | (1 << 10) | 3;
+
+    /* 3. Configure PLL */
+    uint32_t pllm = use_hse ? 25 : 16;
+    uint32_t plln = 192;
+    uint32_t pllp = 0; // /2
+    uint32_t pllsrc = use_hse ? (1 << 22) : 0;
+    RCC_PLLCFGR = (pllm << 0) | (plln << 6) | (pllp << 16) | pllsrc;
+
+    /* 4. Enable PLL */
+    RCC_CR |= (1 << 24); // PLLON
+    while (!(RCC_CR & (1 << 25)));
+
+    /* 5. Set Prescalers */
+    RCC_CFGR &= ~((0xF << 4) | (0x7 << 10) | (0x7 << 13));
+    RCC_CFGR |= (0 << 4) | (4 << 10) | (0 << 13);
+
+    /* 6. Switch to PLL */
+    RCC_CFGR &= ~3;
+    RCC_CFGR |= 2;
+    while (((RCC_CFGR >> 2) & 3) != 2);
+}
+
+void USART1_Init_Baud(uint32_t f_clk) {
+    uint32_t div = (f_clk + (115200 / 2)) / 115200;
+    USART1_BRR = ((div / 16) << 4) | (div % 16);
+}
+
 void USART1_Init_Pins(void) {
     RCC_AHB1ENR |= (1 << 0);
     RCC_APB2ENR |= (1 << 4);
@@ -497,31 +543,14 @@ void USART1_Init_Pins(void) {
 
 void USART1_Init_16MHz(void) {
     USART1_Init_Pins();
-    USART1_BRR = (8 << 4) | 11;
-    USART1_CR1 = (1 << 13) | (1 << 3) | (1 << 2); // UE, TE, RE
+    USART1_Init_Baud(16000000);
+    USART1_CR1 = (1 << 13) | (1 << 3) | (1 << 2);
 }
 
 void USART1_Init_96MHz(void) {
-    /* 96MHz / (16 * 115200) = 52.083 -> Mantissa 52, Fraction 1 */
-    USART1_BRR = (52 << 4) | 1;
-    USART1_CR1 = (1 << 13) | (1 << 3) | (1 << 2); // UE, TE, RE
-}
-
-void SystemClock_Config_96MHz(void) {
-    RCC_CR |= (1 << 16);
-    uint32_t timeout = 0xFFFF;
-    while (!(RCC_CR & (1 << 17)) && --timeout);
-    int use_hse = (RCC_CR & (1 << 17));
-    FLASH_ACR = (1 << 8) | (1 << 9) | (1 << 10) | 3;
-    uint32_t pllm = use_hse ? 25 : 16;
-    uint32_t plln = 192;
-    uint32_t pllp = 0;
-    RCC_PLLCFGR = (pllm << 0) | (plln << 6) | (pllp << 16) | (use_hse ? (1 << 22) : (0 << 22));
-    RCC_CR |= (1 << 24);
-    while (!(RCC_CR & (1 << 25)));
-    RCC_CFGR |= (0 << 4) | (4 << 10) | (0 << 13);
-    RCC_CFGR |= (2 << 0);
-    while ((RCC_CFGR & (3 << 2)) != (2 << 2));
+    USART1_Init_Pins();
+    USART1_Init_Baud(96000000);
+    USART1_CR1 = (1 << 13) | (1 << 3) | (1 << 2);
 }
 
 void uart_putc(char c) {
@@ -539,11 +568,16 @@ int _write(int file, char *ptr, int len) {
 char rx_buffer[32];
 int rx_index = 0;
 
+void System_Reset(void) {
+    Logger_Log("System Reset Requested...");
+    for (volatile int i = 0; i < 500000; i++); // Wait for UART to flush
+    SCB_AIRCR = (0x5FA << 16) | (1 << 2); // VECTKEY | SYSRESETREQ
+    while(1);
+}
+
 void Process_UART(void) {
     while (USART1_SR & (1 << 5)) { // RXNE
         char c = USART1_DR;
-        /* Echo back for debugging */
-        uart_putc(c); 
         
         if (c == '\r' || c == '\n') {
             rx_buffer[rx_index] = '\0';
@@ -567,6 +601,8 @@ void Process_UART(void) {
 
                 RTC_SetDateTime(y, mon, d, h, m, s);
                 Logger_Log("RTC Sync Successful!");
+            } else if (strcmp(rx_buffer, "RESET") == 0) {
+                System_Reset();
             }
             rx_index = 0;
         } else if (rx_index < 31) {
@@ -576,14 +612,25 @@ void Process_UART(void) {
 }
 
 int main(void) {
-    Detect_ResetReason();
+    /* 1. Hardware abstraction and basic config */
     FPU_Enable();
-    USART1_Init_16MHz();
-    Print_Banner();
-    
-    SystemClock_Config_96MHz();
-    USART1_Init_96MHz();
+    Detect_ResetReason();
 
+    /* 2. System Clock Configuration to 96MHz (Critical) */
+    SystemClock_Config_96MHz();
+    
+    /* 3. Initialize Peripherals at final frequency */
+    USART1_Init_96MHz();
+    
+    /* 4. Small delay for hardware stabilization */
+    for (volatile int i = 0; i < 100000; i++);
+
+    /* 5. Print Startup Information */
+    Print_Banner();
+    Logger_Log("System Bootstrapped at 96MHz.");
+    Logger_Log("Reset Reason: %s", reset_reason);
+
+    /* 6. High-level feature initialization */
     STK_LOAD = 96000000 / 1000 - 1;
     STK_VAL = 0;
     STK_CTRL = 0x07;
@@ -594,47 +641,35 @@ int main(void) {
     PWM_Init();
     CRC_Init();
 
-    Logger_Log("System online. Send TYYYYMMDDHHMMSS to sync time.");
     Log_ClockConfiguration();
     Benchmark_CRC();
     Benchmark_DSP();
 
+    /* 7. IO Setup */
     RCC_AHB1ENR |= (1 << 2);
     GPIOC_MODER &= ~(3 << (13 * 2));
     GPIOC_MODER |=  (1 << (13 * 2));
 
-    uint32_t last_blink = 0;
-    uint16_t duty = 0;
+    uint32_t last_status = 0;
     while (1) {
         Process_UART();
         
-        if ((ms_ticks - last_blink) >= 5000) { // Benchmark every 5 seconds
+        if ((ms_ticks - last_status) >= 5000) {
             GPIOC_ODR ^= (1 << 13);
-            Logger_Log("--- System Status ---");
-            Logger_Log("Reset Reason: %s", reset_reason);
+            Logger_Log("--- Periodic Status ---");
             Log_ClockConfiguration();
             int32_t temp_mc = ADC_ReadTemp();
             Logger_Log("CPU Temp: %ld.%03ld C", temp_mc / 1000, temp_mc % 1000);
             
             char adc_msg[128];
             char *p = adc_msg;
-            p += sprintf(p, "ADC Pins: ");
+            p += sprintf(p, "ADC: ");
             for (int i = 0; i < 10; i++) {
-                uint32_t val = ADC_Read(i);
-                p += sprintf(p, "CH%d:%lu ", i, val);
+                p += sprintf(p, "CH%d:%u ", i, ADC_Read(i));
             }
             Logger_Log("%s", adc_msg);
-
-            /* Vary PWM duty cycle */
-            duty = (duty + 20) % 110;
-            PWM_SetDutyCycle(duty);
-            Logger_Log("PWM Status: PA8 (TIM1_CH1) Duty: %d%% | Freq: 375kHz", duty);
-
-            /* Run benchmarks */
-            Benchmark_CRC();
-            Benchmark_DSP();
             
-            last_blink = ms_ticks;
+            last_status = ms_ticks;
         }
     }
 }
