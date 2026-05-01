@@ -246,7 +246,7 @@ void Log_ClockConfiguration(void) {
     
     uint32_t freq = Measure_SystemClock();
     if (freq > 0) {
-        Logger_Log("Measured Clock: %lu.%03lu MHz", freq / 1000000, (freq % 1000000) / 1000);
+        Logger_Log("Measured Clock: %lu Hz", freq);
     } else {
         Logger_Log("Measured Clock: [Syncing...]");
     }
@@ -766,14 +766,15 @@ int main(void) {
             uint32_t sws = (RCC_CFGR >> 2) & 0x3;
             const char* sws_str = (sws == 0) ? "HSI" : (sws == 1) ? "HSE" : (sws == 2) ? "PLL" : "Unknown";
             p += sprintf(p, "  System Clock: %s | Measured: ", sws_str);
-            if (freq > 0) p += sprintf(p, "%lu.%03lu MHz\r\n", freq / 1000000, (freq % 1000000) / 1000);
+            if (freq > 0) p += sprintf(p, "%lu Hz\r\n", freq);
             else p += sprintf(p, "[Syncing...]\r\n");
             
             p += sprintf(p, "  CPU Temp: %ld.%03ld C\r\n", temp_mc / 1000, temp_mc % 1000);
             
-            p += sprintf(p, "  ADC Channels: ");
+            p += sprintf(p, "  ADC Channels:\r\n  ");
             for (int i = 0; i < 10; i++) {
-                p += sprintf(p, "CH%d:%lu ", i, ADC_Read(i));
+                p += sprintf(p, "CH%d:%-4lu  ", i, ADC_Read(i));
+                if (i == 4) p += sprintf(p, "\r\n  ");
             }
             
             Logger_Log("%s", status_buf);
