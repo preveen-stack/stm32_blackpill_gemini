@@ -774,8 +774,30 @@ int rx_index = 0;
 
 void System_Reset(void) {
     Logger_Log("System Reset Requested...");
-    for (volatile int i = 0; i < 500000; i++); // Wait for UART to flush
+    uart_wait_tx_complete();
     SCB_AIRCR = (0x5FA << 16) | (1 << 2); // VECTKEY | SYSRESETREQ
+    while(1);
+}
+
+void System_HardReset(void) {
+    Logger_Log("!!! Hard Reset (Power-Cycle Mimic) Requested !!!");
+    Logger_Log("Clearing Backup Domain and RTC...");
+    uart_wait_tx_complete();
+    
+    /* Enable Power interface clock */
+    RCC_APB1ENR |= (1 << 28);
+    /* Enable access to Backup Domain */
+    PWR_CR |= (1 << 8);
+    
+    /* Reset the entire Backup Domain */
+    RCC_BDCR |= (1 << 16);
+    RCC_BDCR &= ~(1 << 16);
+    
+    /* Small delay for hardware to settle */
+    for (volatile int i = 0; i < 1000000; i++);
+    
+    /* Perform standard system reset */
+    SCB_AIRCR = (0x5FA << 16) | (1 << 2);
     while(1);
 }
 
@@ -1037,7 +1059,8 @@ void Print_Help(void) {
     Logger_Log("  LSM    : LSM303 sub-commands");
     Logger_Log("  PINOUT : Show Blackpill pinout diagram");
     Logger_Log("  ROLL   : Toggle periodic status updates");
-    Logger_Log("  RESET  : Perform a software reset");
+    Logger_Log("  RESET  : Perform a standard software reset");
+    Logger_Log("  HARDRESET : Mimic power-cycle (Clears RTC/Backup)");
     Logger_Log("  TYYYYMMDDHHMMSS : Sync RTC time");
 }
 
@@ -1097,6 +1120,8 @@ void Process_UART(void) {
                 Logger_Log("Periodic Status: %s", rolling_status ? "ENABLED" : "DISABLED");
             } else if (strcmp(rx_buffer, "RESET") == 0) {
                 System_Reset();
+            } else if (strcmp(rx_buffer, "HARDRESET") == 0) {
+                System_HardReset();
             } else {
                 Logger_Log("Unknown Command: %s. Type 'HELP' for list.", rx_buffer);
             }
