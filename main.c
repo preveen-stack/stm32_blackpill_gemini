@@ -832,13 +832,78 @@ void Print_Pinout(void) {
     Logger_Log("      '--------------------'");
 }
 
+/* I2C Multi-byte helpers */
+int I2C1_ReadReg(uint8_t dev_addr, uint8_t reg, uint8_t *data, uint32_t len) {
+    if (!I2C1_Start()) return 0;
+    if (!I2C1_SendAddr(dev_addr << 1)) { I2C1_Stop(); return 0; }
+    if (!I2C1_WriteByte(reg)) { I2C1_Stop(); return 0; }
+    if (!I2C1_Start()) return 0; // Restart
+    if (!I2C1_SendAddr((dev_addr << 1) | 1)) { I2C1_Stop(); return 0; }
+    for (uint32_t i = 0; i < len; i++) {
+        data[i] = I2C1_ReadByte(i < (len - 1));
+    }
+    I2C1_Stop();
+    return 1;
+}
+
+int I2C1_WriteReg(uint8_t dev_addr, uint8_t reg, uint8_t val) {
+    if (!I2C1_Start()) return 0;
+    if (!I2C1_SendAddr(dev_addr << 1)) { I2C1_Stop(); return 0; }
+    if (!I2C1_WriteByte(reg)) { I2C1_Stop(); return 0; }
+    if (!I2C1_WriteByte(val)) { I2C1_Stop(); return 0; }
+    I2C1_Stop();
+    return 1;
+}
+
+void MCP23017_Dump(uint8_t addr) {
+    const char *reg_names[] = {
+        "IODIRA", "IODIRB", "IPOLA ", "IPOLB ", "GPINTEN", "GPINTEN", "DEFVALA", "DEFVALB",
+        "INTCONA", "INTCONB", "IOCON  ", "IOCON  ", "GPPUA  ", "GPPUB  ", "INTFA  ", "INTFB  ",
+        "INTCAPA", "INTCAPB", "GPIOA  ", "GPIOB  ", "OLATA  ", "OLATB  "
+    };
+    uint8_t data[22];
+    if (I2C1_ReadReg(addr, 0x00, data, 22)) {
+        Logger_Log("--- MCP23017 Registers at 0x%02x ---", addr);
+        for (int i = 0; i < 22; i++) {
+            Logger_Log("  0x%02x (%s): 0x%02x", i, reg_names[i], data[i]);
+        }
+    } else {
+        Logger_Log("Failed to read MCP23017 at 0x%02x", addr);
+    }
+}
+
+void Handle_MCP_Command(char *cmd) {
+    uint32_t addr, reg, val;
+    if (sscanf(cmd, "MCP DUMP %lx", &addr) == 1) {
+        MCP23017_Dump((uint8_t)addr);
+    } else if (sscanf(cmd, "MCP SET %lx %lx %lx", &addr, &reg, &val) == 3) {
+        if (I2C1_WriteReg((uint8_t)addr, (uint8_t)reg, (uint8_t)val)) {
+            Logger_Log("MCP 0x%02x: Set Reg 0x%02x to 0x%02x", addr, reg, val);
+        } else {
+            Logger_Log("MCP 0x%02x: Write Failed", addr);
+        }
+    } else if (sscanf(cmd, "MCP GET %lx %lx", &addr, &reg) == 2) {
+        uint8_t data;
+        if (I2C1_ReadReg((uint8_t)addr, (uint8_t)reg, &data, 1)) {
+            Logger_Log("MCP 0x%02x: Reg 0x%02x = 0x%02x", addr, reg, data);
+        } else {
+            Logger_Log("MCP 0x%02x: Read Failed", addr);
+        }
+    } else {
+        Logger_Log("MCP Commands:");
+        Logger_Log("  MCP DUMP <addr>");
+        Logger_Log("  MCP SET <addr> <reg> <val>");
+        Logger_Log("  MCP GET <addr> <reg>");
+    }
+}
+
 void Print_I2C_Help(void) {
     Logger_Log("\r\n--- I2C Commands ---");
     Logger_Log("  I2C        : Show I2C pin info");
     Logger_Log("  I2C DETECT : Scan I2C1 bus for devices");
     Logger_Log("  I2C READ <addr> <len> : Read data from device");
     Logger_Log("  I2C WRITE <addr> <b1> [b2...] : Write data to device");
-    Logger_Log("  (Addresses and bytes are in hex)");
+    Logger_Log("  MCP ...    : MCP23017 helper (Type 'MCP' for info)");
 }
 
 void Handle_I2C_Command(char *cmd) {
@@ -900,6 +965,7 @@ void Print_Help(void) {
     Logger_Log("  TEMP   : Show CPU temperature");
     Logger_Log("  ADC    : Show ADC readings");
     Logger_Log("  I2C    : I2C sub-commands (Type I2C for info)");
+    Logger_Log("  MCP    : MCP23017 sub-commands");
     Logger_Log("  PINOUT : Show Blackpill pinout diagram");
     Logger_Log("  ROLL   : Toggle periodic status updates");
     Logger_Log("  RESET  : Perform a software reset");
@@ -948,6 +1014,8 @@ void Process_UART(void) {
                 Print_Pinout();
             } else if (strncmp(rx_buffer, "I2C", 3) == 0) {
                 Handle_I2C_Command(rx_buffer);
+            } else if (strncmp(rx_buffer, "MCP", 3) == 0) {
+                Handle_MCP_Command(rx_buffer);
             } else if (strcmp(rx_buffer, "ROLL") == 0) {
                 rolling_status = !rolling_status;
                 Logger_Log("Periodic Status: %s", rolling_status ? "ENABLED" : "DISABLED");
