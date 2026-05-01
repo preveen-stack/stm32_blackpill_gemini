@@ -652,37 +652,96 @@ void System_Reset(void) {
     while(1);
 }
 
+int rolling_status = 0;
+
+void Report_Status(void) {
+    int32_t temp_mc = ADC_ReadTemp();
+    uint32_t freq = Measure_SystemClock();
+    
+    char status_buf[512];
+    char *p = status_buf;
+    p += sprintf(p, "--- System Status ---\r\n");
+    
+    uint32_t sws = (RCC_CFGR >> 2) & 0x3;
+    const char* sws_str = (sws == 0) ? "HSI" : (sws == 1) ? "HSE" : (sws == 2) ? "PLL" : "Unknown";
+    p += sprintf(p, "  System Clock: %s | Measured: ", sws_str);
+    if (freq > 0) p += sprintf(p, "%lu Hz\r\n", freq);
+    else p += sprintf(p, "[Syncing...]\r\n");
+    
+    p += sprintf(p, "  CPU Temp: %ld.%03ld C\r\n", temp_mc / 1000, temp_mc % 1000);
+    
+    p += sprintf(p, "  ADC Channels:\r\n  ");
+    for (int i = 0; i < 10; i++) {
+        p += sprintf(p, "CH%d:%-4lu  ", i, ADC_Read(i));
+        if (i == 4) p += sprintf(p, "\r\n  ");
+    }
+    p += sprintf(p, "\r\nType 'HELP' for available commands.");
+    
+    Logger_Log("%s", status_buf);
+}
+
+void Print_Help(void) {
+    Logger_Log("\r\n--- Available Commands ---");
+    Logger_Log("  HELP   : Show this help message");
+    Logger_Log("  STATUS : Show current system status");
+    Logger_Log("  CLOCK  : Show clock configuration");
+    Logger_Log("  TEMP   : Show CPU temperature");
+    Logger_Log("  ADC    : Show ADC readings");
+    Logger_Log("  ROLL   : Toggle periodic status updates");
+    Logger_Log("  RESET  : Perform a software reset");
+    Logger_Log("  TYYYYMMDDHHMMSS : Sync RTC time");
+}
+
 void Process_UART(void) {
     while (USART1_SR & (1 << 5)) { // RXNE
         char c = USART1_DR;
         
         if (c == '\r' || c == '\n') {
+            if (rx_index == 0) continue;
             rx_buffer[rx_index] = '\0';
+            
             if (rx_index == 15 && rx_buffer[0] == 'T') {
-                /* Format: TYYYYMMDDHHMMSS */
+                /* RTC Sync logic unchanged */
                 int y, mon, d, h, m, s;
                 char tmp[5];
-                
-                tmp[0] = rx_buffer[1]; tmp[1] = rx_buffer[2]; tmp[2] = rx_buffer[3]; tmp[3] = rx_buffer[4]; tmp[4] = '\0';
+                tmp[0]=rx_buffer[1]; tmp[1]=rx_buffer[2]; tmp[2]=rx_buffer[3]; tmp[3]=rx_buffer[4]; tmp[4]='\0';
                 y = atoi(tmp) - 2000;
-                tmp[0] = rx_buffer[5]; tmp[1] = rx_buffer[6]; tmp[2] = '\0';
-                mon = atoi(tmp);
-                tmp[0] = rx_buffer[7]; tmp[1] = rx_buffer[8]; tmp[2] = '\0';
-                d = atoi(tmp);
-                tmp[0] = rx_buffer[9]; tmp[1] = rx_buffer[10]; tmp[2] = '\0';
-                h = atoi(tmp);
-                tmp[0] = rx_buffer[11]; tmp[1] = rx_buffer[12]; tmp[2] = '\0';
-                m = atoi(tmp);
-                tmp[0] = rx_buffer[13]; tmp[1] = rx_buffer[14]; tmp[2] = '\0';
-                s = atoi(tmp);
-
+                tmp[0]=rx_buffer[5]; tmp[1]=rx_buffer[6]; tmp[2]='\0'; mon = atoi(tmp);
+                tmp[0]=rx_buffer[7]; tmp[1]=rx_buffer[8]; tmp[2]='\0'; d = atoi(tmp);
+                tmp[0]=rx_buffer[9]; tmp[1]=rx_buffer[10]; tmp[2]='\0'; h = atoi(tmp);
+                tmp[0]=rx_buffer[11]; tmp[1]=rx_buffer[12]; tmp[2]='\0'; m = atoi(tmp);
+                tmp[0]=rx_buffer[13]; tmp[1]=rx_buffer[14]; tmp[2]='\0'; s = atoi(tmp);
                 RTC_SetDateTime(y, mon, d, h, m, s);
                 Logger_Log("RTC Sync Successful!");
+            } else if (strcmp(rx_buffer, "HELP") == 0) {
+                Print_Help();
+            } else if (strcmp(rx_buffer, "STATUS") == 0) {
+                Report_Status();
+            } else if (strcmp(rx_buffer, "CLOCK") == 0) {
+                Log_ClockConfiguration();
+            } else if (strcmp(rx_buffer, "TEMP") == 0) {
+                int32_t temp_mc = ADC_ReadTemp();
+                Logger_Log("CPU Temp: %ld.%03ld C", temp_mc / 1000, temp_mc % 1000);
+            } else if (strcmp(rx_buffer, "ADC") == 0) {
+                char adc_msg[256]; char *p = adc_msg;
+                p += sprintf(p, "ADC Readings:\r\n  ");
+                for (int i = 0; i < 10; i++) {
+                    p += sprintf(p, "CH%d:%-4lu  ", i, ADC_Read(i));
+                    if (i == 4) p += sprintf(p, "\r\n  ");
+                }
+                Logger_Log("%s", adc_msg);
+            } else if (strcmp(rx_buffer, "ROLL") == 0) {
+                rolling_status = !rolling_status;
+                Logger_Log("Periodic Status: %s", rolling_status ? "ENABLED" : "DISABLED");
             } else if (strcmp(rx_buffer, "RESET") == 0) {
                 System_Reset();
+            } else {
+                Logger_Log("Unknown Command: %s. Type 'HELP' for list.", rx_buffer);
             }
             rx_index = 0;
         } else if (rx_index < 31) {
+            /* Echo character back (basic terminal behavior) */
+            uart_putc(c);
             rx_buffer[rx_index++] = c;
         }
     }
@@ -750,34 +809,13 @@ int main(void) {
         Process_UART();
         
         /* Advance the frequency measurement state machine */
-        uint32_t freq = Measure_SystemClock();
+        Measure_SystemClock();
         
         uint32_t current_ticks = ms_ticks;
-        if ((current_ticks - last_status) >= 5000) {
+        if (rolling_status && (current_ticks - last_status) >= 5000) {
             last_status = current_ticks;
             GPIOC_ODR ^= (1 << 13);
-            
-            int32_t temp_mc = ADC_ReadTemp();
-            
-            char status_buf[512];
-            char *p = status_buf;
-            p += sprintf(p, "--- Periodic Status ---\r\n");
-            
-            uint32_t sws = (RCC_CFGR >> 2) & 0x3;
-            const char* sws_str = (sws == 0) ? "HSI" : (sws == 1) ? "HSE" : (sws == 2) ? "PLL" : "Unknown";
-            p += sprintf(p, "  System Clock: %s | Measured: ", sws_str);
-            if (freq > 0) p += sprintf(p, "%lu Hz\r\n", freq);
-            else p += sprintf(p, "[Syncing...]\r\n");
-            
-            p += sprintf(p, "  CPU Temp: %ld.%03ld C\r\n", temp_mc / 1000, temp_mc % 1000);
-            
-            p += sprintf(p, "  ADC Channels:\r\n  ");
-            for (int i = 0; i < 10; i++) {
-                p += sprintf(p, "CH%d:%-4lu  ", i, ADC_Read(i));
-                if (i == 4) p += sprintf(p, "\r\n  ");
-            }
-            
-            Logger_Log("%s", status_buf);
+            Report_Status();
         }
     }
 }
