@@ -180,16 +180,22 @@ void DWT_Init(void) {
 }
 
 uint32_t Measure_SystemClock(void) {
-    if (!rtc_ready) return 0;
-    
     static uint32_t state = 0;
     static uint32_t start_tr = 0;
     static uint32_t start_cycles = 0;
     static uint32_t last_freq = 0;
 
+    if (!rtc_ready) {
+        /* Fallback: Quick measurement using SysTick (10ms window) */
+        uint32_t start_ms = ms_ticks;
+        uint32_t start_c = DWT_CYCCNT;
+        while ((ms_ticks - start_ms) < 10);
+        uint32_t end_c = DWT_CYCCNT;
+        return (end_c - start_c) * 100;
+    }
+
     uint32_t current_tr = RTC_TR;
 
-    /* Non-blocking state machine to measure clock across RTC second boundaries */
     if (state == 0) {
         start_tr = current_tr;
         state = 1;
@@ -202,7 +208,11 @@ uint32_t Measure_SystemClock(void) {
     } else if (state == 2) {
         if (current_tr != start_tr) {
             uint32_t end_cycles = DWT_CYCCNT;
-            last_freq = (end_cycles - start_cycles);
+            uint32_t delta = end_cycles - start_cycles;
+            /* Validation: 96MHz +/- 10% */
+            if (delta > 80000000 && delta < 110000000) {
+                last_freq = delta;
+            }
             state = 0; 
         }
     }
@@ -273,38 +283,28 @@ void RTC_Init(void) {
     RCC_APB1ENR |= (1 << 28); // PWREN
     PWR_CR |= (1 << 8); // DBP
 
-    /* If RTC is already enabled, check if it's actually ticking */
-    if (RCC_BDCR & (1 << 15)) {
-        uint32_t start_tr = RTC_TR;
-        int ticking = 0;
-        for (volatile int i = 0; i < 100000; i++) {
-            if (RTC_TR != start_tr) {
-                ticking = 1;
-                break;
-            }
-        }
-        if (ticking) {
-            rtc_ready = 1;
-            return;
-        }
-        Logger_Log("RTC enabled but stalled, resetting Backup Domain...");
-        RCC_BDCR |= (1 << 16);
-        RCC_BDCR &= ~(1 << 16);
-        /* Small delay for stabilization after reset */
-        for (volatile int i = 0; i < 100000; i++);
-    }
+    /* Force a clean start on every reset to ensure LSI and RTC are fresh */
+    Logger_Log("Resetting RTC Backup Domain...");
+    RCC_BDCR |= (1 << 16);
+    RCC_BDCR &= ~(1 << 16);
+    for (volatile int i = 0; i < 100000; i++);
 
-    /* 1. Try to enable LSI */
+    /* 1. Enable LSI */
     RCC_CSR |= (1 << 0); // LSION
-    uint32_t timeout = 0x3FFFF; // More patient timeout
+    uint32_t timeout = 0x3FFFF;
     while (!(RCC_CSR & (1 << 1)) && --timeout);
+
+    if (timeout == 0) {
+        Logger_Log("LSI Start Failed!");
+        return;
+    }
 
     /* 2. Configure Backup Domain */
     RCC_BDCR &= ~(3 << 8);
     RCC_BDCR |=  (2 << 8); // LSI
     RCC_BDCR |=  (1 << 15); // RTCEN
 
-    /* 3. Synchronization and Initialization */
+    /* 3. Initialization */
     RTC_WPR = 0xCA;
     RTC_WPR = 0x53;
     
@@ -322,6 +322,7 @@ void RTC_Init(void) {
         RTC_PRER = (127 << 16) | 249; 
         RTC_ISR &= ~(1 << 7);
         rtc_ready = 1;
+        Logger_Log("RTC Initialized successfully.");
     } else {
         Logger_Log("RTC Init Mode Timeout!");
     }
