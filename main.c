@@ -544,12 +544,6 @@ void I2C1_Scan(void) {
     }
 }
 
-void PWM_SetDutyCycle(uint16_t duty) {
-    if (duty > 100) duty = 100;
-    /* ARR is 255 */
-    TIM1_CCR1 = (duty * 255) / 100;
-}
-
 void CRC_Init(void) {
     RCC_AHB1ENR |= (1 << 12); // CRCEN
 }
@@ -632,32 +626,60 @@ void Benchmark_DSP(void) {
     }
 }
 
-void PWM_Init(void) {
+uint32_t pwm_current_freq = 1000; // Default 1kHz
+uint32_t pwm_current_duty = 0;
+
+void PWM_SetDutyCycle(uint16_t duty) {
+    if (duty > 100) duty = 100;
+    pwm_current_duty = duty;
+    uint32_t arr = TIM1_ARR;
+    TIM1_CCR1 = (duty * arr) / 100;
+}
+
+void PWM_Init_Freq(uint32_t freq) {
+    if (freq == 0) freq = 1;
+    pwm_current_freq = freq;
+
     /* 1. Enable TIM1 and GPIOA clocks */
     RCC_APB2ENR |= (1 << 0); // TIM1EN
     RCC_AHB1ENR |= (1 << 0); // GPIOAEN
 
-    /* 2. Configure PA8 as Alternate Function AF1 (TIM1_CH1) */
+    /* 2. Configure PA8 as AF1 */
     GPIOA_MODER &= ~(3 << (8 * 2));
-    GPIOA_MODER |=  (2 << (8 * 2)); // AF mode
-    GPIOA_AFRH  &= ~(0xF << (0 * 4)); // Clear AF for PA8
-    GPIOA_AFRH  |=  (1 << (0 * 4));   // AF1
+    GPIOA_MODER |=  (2 << (8 * 2)); 
+    GPIOA_AFRH  &= ~(0xF << (0 * 4));
+    GPIOA_AFRH  |=  (1 << (0 * 4));   
 
-    /* 3. Configure TIM1 for PWM 
-       Frequency = 96MHz / (0+1) / (255+1) = 375kHz
+    /* 3. Calculate PSC and ARR
+       Freq = 96MHz / ((PSC+1) * (ARR+1))
+       Let's keep resolution high (ARR ~ 1000) if possible.
     */
-    TIM1_PSC = 0;
-    TIM1_ARR = 255;
-    TIM1_CCR1 = 0;           // Initial Duty Cycle = 0%
+    uint32_t timer_clk = 96000000;
+    uint32_t total_div = timer_clk / freq;
+    
+    uint32_t psc = (total_div / 1000);
+    if (psc > 65535) psc = 65535;
+    uint32_t arr = (total_div / (psc + 1)) - 1;
+    if (arr > 65535) arr = 65535;
+
+    TIM1_PSC = psc;
+    TIM1_ARR = arr;
+    
+    /* Re-apply duty cycle with new ARR */
+    PWM_SetDutyCycle(pwm_current_duty);
 
     /* PWM mode 1, preload enable */
     TIM1_CCMR1 = (6 << 4) | (1 << 3); 
     /* Enable output on CH1 */
     TIM1_CCER |= (1 << 0);
-    /* MOE: Main Output Enable (Required for TIM1) */
+    /* MOE: Main Output Enable */
     TIM1_BDTR |= (1 << 15);
     /* Enable counter */
     TIM1_CR1 |= (1 << 0);
+}
+
+void PWM_Init(void) {
+    PWM_Init_Freq(1000); // Start at 1kHz
 }
 
 uint32_t CRC_Hardware(uint32_t *data, uint32_t len) {
@@ -1207,8 +1229,8 @@ void Handle_I2S_Command(char *cmd) {
 
 void Handle_PWM_Command(char *cmd) {
     if (strcmp(cmd, "PWM") == 0) {
-        Logger_Log("PWM1: TIM1_CH1 on PA8");
-        Logger_Log("Type 'PWM SET <0-100>' to change duty cycle.");
+        Logger_Log("PWM1: TIM1_CH1 on PA8. Freq: %lu Hz, Duty: %lu%%", pwm_current_freq, pwm_current_duty);
+        Logger_Log("Type 'PWM SET <0-100>' or 'PWM FREQ <hz>'.");
     } else if (strcmp(cmd, "PWM INIT") == 0) {
         PWM_Init();
         Logger_Log("PWM1 (TIM1) Initialized on PA8.");
@@ -1217,11 +1239,16 @@ void Handle_PWM_Command(char *cmd) {
         if (duty > 100) duty = 100;
         PWM_SetDutyCycle((uint16_t)duty);
         Logger_Log("PWM1 Duty Cycle set to %lu%%", duty);
+    } else if (strncmp(cmd, "PWM FREQ ", 9) == 0) {
+        uint32_t freq = atoi(cmd + 9);
+        PWM_Init_Freq(freq);
+        Logger_Log("PWM1 Frequency set to %lu Hz", pwm_current_freq);
     } else {
         Logger_Log("PWM Commands:");
-        Logger_Log("  PWM        : Show pin info");
-        Logger_Log("  PWM INIT   : Initialize PWM");
-        Logger_Log("  PWM SET <d> : Set duty cycle (0-100)");
+        Logger_Log("  PWM           : Show pin info and current settings");
+        Logger_Log("  PWM INIT      : Initialize PWM (1kHz default)");
+        Logger_Log("  PWM SET <d>   : Set duty cycle (0-100)");
+        Logger_Log("  PWM FREQ <f>  : Set frequency in Hz");
     }
 }
 
