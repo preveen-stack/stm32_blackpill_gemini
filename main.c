@@ -16,6 +16,7 @@
 #define RTC_BASE        0x40002800
 #define I2C1_BASE       0x40005400
 #define SPI1_BASE       0x40013000
+#define SPI2_BASE       0x40003800
 
 /* I2C Registers */
 #define I2C1_CR1        (*(volatile uint32_t *)(I2C1_BASE + 0x00))
@@ -31,6 +32,14 @@
 #define SPI1_CR2        (*(volatile uint32_t *)(SPI1_BASE + 0x04))
 #define SPI1_SR         (*(volatile uint32_t *)(SPI1_BASE + 0x08))
 #define SPI1_DR         (*(volatile uint32_t *)(SPI1_BASE + 0x0C))
+
+/* I2S/SPI2 Registers */
+#define SPI2_CR1        (*(volatile uint32_t *)(SPI2_BASE + 0x00))
+#define SPI2_CR2        (*(volatile uint32_t *)(SPI2_BASE + 0x04))
+#define SPI2_SR         (*(volatile uint32_t *)(SPI2_BASE + 0x08))
+#define SPI2_DR         (*(volatile uint32_t *)(SPI2_BASE + 0x0C))
+#define SPI2_I2SCFGR    (*(volatile uint32_t *)(SPI2_BASE + 0x1C))
+#define SPI2_I2SPR      (*(volatile uint32_t *)(SPI2_BASE + 0x20))
 
 /* RCC Registers */
 #define RCC_CR          (*(volatile uint32_t *)(RCC_BASE + 0x00))
@@ -1122,6 +1131,70 @@ void Handle_I2C_Command(char *cmd) {
         }
     } else {
         Print_I2C_Help();
+    }
+}
+
+void I2S2_Init(void) {
+    /* 1. Enable SPI2 clock and GPIOB clock */
+    RCC_APB1ENR |= (1 << 14); // SPI2EN
+    RCC_AHB1ENR |= (1 << 1);  // GPIOBEN
+
+    /* 2. Configure PB12 (WS), PB13 (CK), PB15 (SD) as AF5 */
+    GPIOB_MODER &= ~((3 << (12 * 2)) | (3 << (13 * 2)) | (3 << (15 * 2)));
+    GPIOB_MODER |=  ((2 << (12 * 2)) | (2 << (13 * 2)) | (2 << (15 * 2)));
+    
+    /* AFRH for pins 12, 13, 15: AF5 */
+    *(volatile uint32_t *)(GPIOB_BASE + 0x24) &= ~((0xF << (4 * 4)) | (0xF << (5 * 4)) | (0xF << (7 * 4)));
+    *(volatile uint32_t *)(GPIOB_BASE + 0x24) |=  ((5 << (4 * 4)) | (5 << (5 * 4)) | (5 << (7 * 4)));
+
+    /* 3. I2S Configuration (44.1kHz, 16-bit) */
+    /* PCLK1 is 48MHz. I2S clock usually comes from PLLI2S, but on F411 we use system clock.
+       Fs = f(I2SCLK) / [2 * (16 * 2) * ( (2 * I2SDIV) + ODD)]
+       For 44.1kHz from 96MHz: DIV=34, ODD=0 roughly.
+    */
+    SPI2_I2SPR = (0 << 8) | 34; // ODD=0, DIV=34
+    
+    /* I2SMOD=1, I2SCFG=10 (Master Transmit), I2SSTD=00 (Phillips), DATLEN=00 (16-bit) */
+    SPI2_I2SCFGR = (1 << 11) | (2 << 8) | (1 << 10); // I2SMOD, Master TX, SPE
+}
+
+void I2S2_Write(uint16_t data) {
+    while (!(SPI2_SR & (1 << 1))); // Wait for TXE
+    SPI2_DR = data;
+}
+
+void Handle_I2S_Command(char *cmd) {
+    if (strcmp(cmd, "I2S") == 0) {
+        Logger_Log("I2S2: WS=PB12, CK=PB13, SD=PB15");
+        Logger_Log("Type 'I2S INIT' to enable.");
+    } else if (strcmp(cmd, "I2S INIT") == 0) {
+        I2S2_Init();
+        Logger_Log("I2S2 Initialized (44.1kHz, 16-bit).");
+    } else if (strncmp(cmd, "I2S TONE ", 8) == 0) {
+        uint32_t freq = atoi(cmd + 8);
+        if (freq == 0) freq = 440;
+        Logger_Log("Generating %lu Hz Square Wave (5s)...", freq);
+        
+        uint32_t half_period_samples = 44100 / (freq * 2);
+        uint32_t start = ms_ticks;
+        while ((ms_ticks - start) < 5000) {
+            /* Square wave high */
+            for (uint32_t i = 0; i < half_period_samples; i++) {
+                I2S2_Write(0x7FFF); // Left
+                I2S2_Write(0x7FFF); // Right
+            }
+            /* Square wave low */
+            for (uint32_t i = 0; i < half_period_samples; i++) {
+                I2S2_Write(0x8000); // Left
+                I2S2_Write(0x8000); // Right
+            }
+        }
+        Logger_Log("Tone finished.");
+    } else {
+        Logger_Log("I2S Commands:");
+        Logger_Log("  I2S        : Show pin info");
+        Logger_Log("  I2S INIT   : Initialize I2S2");
+        Logger_Log("  I2S TONE <f> : Play 5s square wave");
     }
 }
 
