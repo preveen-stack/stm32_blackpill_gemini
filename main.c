@@ -897,13 +897,74 @@ void Handle_MCP_Command(char *cmd) {
     }
 }
 
+void LSM303_Init(void) {
+    /* Accelerometer: 0x19 */
+    /* CTRL_REG1_A: 50Hz, all axes enabled */
+    if (I2C1_WriteReg(0x19, 0x20, 0x47)) {
+        Logger_Log("LSM303 Accel Initialized (0x19)");
+    } else {
+        Logger_Log("LSM303 Accel Init Failed");
+    }
+
+    /* Magnetometer: 0x1E */
+    /* MR_REG_M: Continuous conversion mode */
+    if (I2C1_WriteReg(0x1E, 0x02, 0x00)) {
+        Logger_Log("LSM303 Mag Initialized (0x1E)");
+    } else {
+        Logger_Log("LSM303 Mag Init Failed");
+    }
+}
+
+void LSM303_ReadAcc(void) {
+    uint8_t data[6];
+    /* Read 6 bytes starting from OUT_X_L_A (0x28 | 0x80 for auto-increment) */
+    if (I2C1_ReadReg(0x19, 0x28 | 0x80, data, 6)) {
+        int16_t x = (int16_t)(data[0] | (data[1] << 8));
+        int16_t y = (int16_t)(data[2] | (data[3] << 8));
+        int16_t z = (int16_t)(data[4] | (data[5] << 8));
+        Logger_Log("LSM303 Accel: X=%d Y=%d Z=%d", x, y, z);
+    } else {
+        Logger_Log("LSM303 Accel Read Failed");
+    }
+}
+
+void LSM303_ReadMag(void) {
+    uint8_t data[6];
+    /* Read 6 bytes starting from OUT_X_H_M (0x03) */
+    if (I2C1_ReadReg(0x1E, 0x03, data, 6)) {
+        /* Note: Mag data is Big-Endian and Y/Z are swapped in address space vs Acc */
+        int16_t x = (int16_t)((data[0] << 8) | data[1]);
+        int16_t z = (int16_t)((data[2] << 8) | data[3]);
+        int16_t y = (int16_t)((data[4] << 8) | data[5]);
+        Logger_Log("LSM303 Mag: X=%d Y=%d Z=%d", x, y, z);
+    } else {
+        Logger_Log("LSM303 Mag Read Failed");
+    }
+}
+
+void Handle_LSM_Command(char *cmd) {
+    if (strcmp(cmd, "LSM INIT") == 0) {
+        LSM303_Init();
+    } else if (strcmp(cmd, "LSM ACC") == 0) {
+        LSM303_ReadAcc();
+    } else if (strcmp(cmd, "LSM MAG") == 0) {
+        LSM303_ReadMag();
+    } else {
+        Logger_Log("LSM Commands:");
+        Logger_Log("  LSM INIT : Initialize sensor");
+        Logger_Log("  LSM ACC  : Read Accelerometer");
+        Logger_Log("  LSM MAG  : Read Magnetometer");
+    }
+}
+
 void Print_I2C_Help(void) {
     Logger_Log("\r\n--- I2C Commands ---");
     Logger_Log("  I2C        : Show I2C pin info");
     Logger_Log("  I2C DETECT : Scan I2C1 bus for devices");
     Logger_Log("  I2C READ <addr> <len> : Read data from device");
     Logger_Log("  I2C WRITE <addr> <b1> [b2...] : Write data to device");
-    Logger_Log("  MCP ...    : MCP23017 helper (Type 'MCP' for info)");
+    Logger_Log("  MCP ...    : MCP23017 helper");
+    Logger_Log("  LSM ...    : LSM303 helper (Type 'LSM' for info)");
 }
 
 void Handle_I2C_Command(char *cmd) {
@@ -966,6 +1027,7 @@ void Print_Help(void) {
     Logger_Log("  ADC    : Show ADC readings");
     Logger_Log("  I2C    : I2C sub-commands (Type I2C for info)");
     Logger_Log("  MCP    : MCP23017 sub-commands");
+    Logger_Log("  LSM    : LSM303 sub-commands");
     Logger_Log("  PINOUT : Show Blackpill pinout diagram");
     Logger_Log("  ROLL   : Toggle periodic status updates");
     Logger_Log("  RESET  : Perform a software reset");
@@ -1016,6 +1078,8 @@ void Process_UART(void) {
                 Handle_I2C_Command(rx_buffer);
             } else if (strncmp(rx_buffer, "MCP", 3) == 0) {
                 Handle_MCP_Command(rx_buffer);
+            } else if (strncmp(rx_buffer, "LSM", 3) == 0) {
+                Handle_LSM_Command(rx_buffer);
             } else if (strcmp(rx_buffer, "ROLL") == 0) {
                 rolling_status = !rolling_status;
                 Logger_Log("Periodic Status: %s", rolling_status ? "ENABLED" : "DISABLED");
