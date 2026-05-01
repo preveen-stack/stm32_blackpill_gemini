@@ -9,6 +9,7 @@ extern uint32_t _ebss;
 
 void Reset_Handler(void);
 void Default_Handler(void);
+void HardFault_Handler(void);
 void SysTick_Handler(void);
 extern int main(void);
 
@@ -18,7 +19,7 @@ uint32_t vectors[] = {
     (uint32_t)&_estack,      /* 0: Stack pointer */
     (uint32_t)&Reset_Handler, /* 1: Reset handler */
     (uint32_t)&Default_Handler, /* 2: NMI */
-    (uint32_t)&Default_Handler, /* 3: HardFault */
+    (uint32_t)&HardFault_Handler, /* 3: HardFault */
     (uint32_t)&Default_Handler, /* 4: MemManage */
     (uint32_t)&Default_Handler, /* 5: BusFault */
     (uint32_t)&Default_Handler, /* 6: UsageFault */
@@ -46,5 +47,11 @@ void Reset_Handler(void) {
 }
 
 void Default_Handler(void) {
+    while (1);
+}
+
+void HardFault_Handler(void) {
+    /* If we hit this, we are in trouble. 
+       Try to signal it somehow if we can't use printf. */
     while (1);
 }

@@ -126,7 +126,25 @@ void SysTick_Handler(void) {
     ms_ticks++;
 }
 
+void uart_putc(char c);
+
+int _write(int file, char *ptr, int len) {
+    for (int i = 0; i < len; i++) {
+        uart_putc(ptr[i]);
+    }
+    return len;
+}
+
+void uart_wait_tx_complete(void) {
+    /* Wait for TC (Transmission Complete) bit */
+    while (!(USART1_SR & (1 << 6)));
+}
+
+static char log_buffer[1024];
+
 void Logger_Log(const char *fmt, ...) {
+    int len = 0;
+    
     if (rtc_ready) {
         uint32_t tr = RTC_TR;
         uint32_t dr = RTC_DR;
@@ -136,18 +154,20 @@ void Logger_Log(const char *fmt, ...) {
         int y = ((dr >> 20) & 0xF) * 10 + ((dr >> 16) & 0xF);
         int mon = ((dr >> 12) & 0x1) * 10 + ((dr >> 8) & 0xF);
         int d = ((dr >> 4) & 0x3) * 10 + (dr & 0xF);
-        printf("[%02d/%02d/20%02d %02d:%02d:%02d] ", d, mon, y, h, m, s);
+        len = sprintf(log_buffer, "[%02d/%02d/20%02d %02d:%02d:%02d] ", d, mon, y, h, m, s);
     } else {
-        printf("[%lu ms] ", ms_ticks);
+        len = sprintf(log_buffer, "[%lu ms] ", ms_ticks);
     }
 
     va_list args;
     va_start(args, fmt);
-    vprintf(fmt, args);
+    len += vsnprintf(log_buffer + len, sizeof(log_buffer) - len - 4, fmt, args);
     va_end(args);
-    printf("\r\n");
+    
+    strcat(log_buffer, "\r\n");
+    _write(1, log_buffer, strlen(log_buffer));
+    uart_wait_tx_complete();
 }
-
 void delay_ms(uint32_t ms) {
     uint32_t start = ms_ticks;
     while ((ms_ticks - start) < ms);
@@ -161,19 +181,32 @@ void DWT_Init(void) {
 
 uint32_t Measure_SystemClock(void) {
     if (!rtc_ready) return 0;
+    
+    static uint32_t state = 0;
+    static uint32_t start_tr = 0;
+    static uint32_t start_cycles = 0;
+    static uint32_t last_freq = 0;
 
-    /* Wait for RTC second boundary */
-    uint32_t start_tr = RTC_TR;
-    while (RTC_TR == start_tr);
-    
-    uint32_t start_cycles = DWT_CYCCNT;
-    
-    /* Wait for next RTC second */
-    start_tr = RTC_TR;
-    while (RTC_TR == start_tr);
-    
-    uint32_t end_cycles = DWT_CYCCNT;
-    return (end_cycles - start_cycles);
+    uint32_t current_tr = RTC_TR;
+
+    /* Non-blocking state machine to measure clock across RTC second boundaries */
+    if (state == 0) {
+        start_tr = current_tr;
+        state = 1;
+    } else if (state == 1) {
+        if (current_tr != start_tr) {
+            start_cycles = DWT_CYCCNT;
+            start_tr = current_tr;
+            state = 2;
+        }
+    } else if (state == 2) {
+        if (current_tr != start_tr) {
+            uint32_t end_cycles = DWT_CYCCNT;
+            last_freq = (end_cycles - start_cycles);
+            state = 0; 
+        }
+    }
+    return last_freq;
 }
 
 void Log_ClockConfiguration(void) {
@@ -186,35 +219,37 @@ void Log_ClockConfiguration(void) {
     uint32_t sws = (cfgr >> 2) & 0x3;
 
     const char* sws_str = "Unknown";
-    if (sws == 0) sws_str = "HSI";
-    else if (sws == 1) sws_str = "HSE";
-    else if (sws == 2) sws_str = "PLL";
+    if (sws == 0) sws_str = "HSI (16MHz)";
+    else if (sws == 1) sws_str = "HSE (25MHz)";
+    else if (sws == 2) sws_str = "PLL (96MHz)";
 
     Logger_Log("--- Clock Status ---");
-    Logger_Log("System Clock (SWS): %s", sws_str);
-    Logger_Log("PLL Source: %s | PLL Config: M=%lu N=%lu P=%lu", pll_src ? "HSE" : "HSI", m, n, p);
+    Logger_Log("System Source: %s", sws_str);
+    Logger_Log("PLL: Src=%s M=%lu N=%lu P=%lu", pll_src ? "HSE" : "HSI", m, n, p);
     
     uint32_t hse_rdy = (RCC_CR >> 17) & 1;
     uint32_t hsi_rdy = (RCC_CR >> 1) & 1;
     uint32_t lse_rdy = (RCC_BDCR >> 1) & 1;
     uint32_t lsi_rdy = (RCC_CSR >> 1) & 1;
     
-    Logger_Log("Oscillators Ready: HSE:%d HSI:%d LSE:%d LSI:%d", hse_rdy, hsi_rdy, lse_rdy, lsi_rdy);
+    Logger_Log("Oscillators: HSE:%d HSI:%d LSE:%d LSI:%d", hse_rdy, hsi_rdy, lse_rdy, lsi_rdy);
     
     uint32_t freq = Measure_SystemClock();
-    Logger_Log("Measured SysClock: %lu.%06lu MHz", freq / 1000000, freq % 1000000);
+    if (freq > 0) {
+        Logger_Log("Measured Clock: %lu.%03lu MHz", freq / 1000000, (freq % 1000000) / 1000);
+    } else {
+        Logger_Log("Measured Clock: [Syncing...]");
+    }
 }
 
 void Print_Banner(void) {
-    printf("\r\n");
-    printf("****************************************************\r\n");
-    printf("*                                                  *\r\n");
-    printf("*         STM32 BLACKPILL F411 BAREMETAL           *\r\n");
-    printf("*                                                  *\r\n");
-    printf("*            Created using Gemini CLI              *\r\n");
-    printf("*                                                  *\r\n");
-    printf("****************************************************\r\n");
-    printf("\r\n");
+    Logger_Log("****************************************************");
+    Logger_Log("*                                                  *");
+    Logger_Log("*         STM32 BLACKPILL F411 BAREMETAL           *");
+    Logger_Log("*                                                  *");
+    Logger_Log("*            Created using Gemini CLI              *");
+    Logger_Log("*                                                  *");
+    Logger_Log("****************************************************");
 }
 
 static uint8_t to_bcd(uint8_t val) {
@@ -235,39 +270,64 @@ void RTC_SetDateTime(uint8_t y, uint8_t mon, uint8_t d, uint8_t h, uint8_t min, 
 }
 
 void RTC_Init(void) {
-    RCC_APB1ENR |= (1 << 28);
-    PWR_CR |= (1 << 8);
+    RCC_APB1ENR |= (1 << 28); // PWREN
+    PWR_CR |= (1 << 8); // DBP
 
-    RCC_BDCR |= (1 << 0);
-    uint32_t timeout = 0xFFFFF;
-    while (!(RCC_BDCR & (1 << 1)) && --timeout);
-
-    uint32_t prediv_a, prediv_s;
-    if (RCC_BDCR & (1 << 1)) {
-        RCC_BDCR |= (1 << 8);
-        prediv_a = 127;
-        prediv_s = 255;
-    } else {
-        RCC_CSR |= (1 << 0);
-        while (!(RCC_CSR & (1 << 1)));
-        RCC_BDCR &= ~(3 << 8);
-        RCC_BDCR |=  (2 << 8);
-        prediv_a = 127;
-        prediv_s = 249;
+    /* If RTC is already enabled, check if it's actually ticking */
+    if (RCC_BDCR & (1 << 15)) {
+        uint32_t start_tr = RTC_TR;
+        int ticking = 0;
+        for (volatile int i = 0; i < 100000; i++) {
+            if (RTC_TR != start_tr) {
+                ticking = 1;
+                break;
+            }
+        }
+        if (ticking) {
+            rtc_ready = 1;
+            return;
+        }
+        Logger_Log("RTC enabled but not ticking, resetting Backup Domain...");
+        RCC_BDCR |= (1 << 16);
+        RCC_BDCR &= ~(1 << 16);
     }
 
-    RCC_BDCR |= (1 << 15);
+    /* 1. Try to enable LSI */
+    RCC_CSR |= (1 << 0); // LSION
+    uint32_t timeout = 0xFFFF;
+    while (!(RCC_CSR & (1 << 1)) && --timeout);
+
+    /* 2. Configure Backup Domain */
+    RCC_BDCR &= ~(3 << 8);
+    RCC_BDCR |=  (2 << 8); // LSI
+    RCC_BDCR |=  (1 << 15); // RTCEN
+
+    /* 3. Synchronization and Initialization */
     RTC_WPR = 0xCA;
     RTC_WPR = 0x53;
+    
+    /* Wait for RSF */
+    RTC_ISR &= ~(1 << 5);
+    timeout = 0xFFFF;
+    while (!(RTC_ISR & (1 << 5)) && --timeout);
+
+    /* Enter Init Mode */
     RTC_ISR |= (1 << 7);
-    while (!(RTC_ISR & (1 << 6)));
-    RTC_PRER = (prediv_a << 16) | prediv_s;
-    RTC_ISR &= ~(1 << 7);
+    timeout = 0xFFFF;
+    while (!(RTC_ISR & (1 << 6)) && --timeout);
+    
+    if (timeout > 0) {
+        RTC_PRER = (127 << 16) | 249; 
+        RTC_ISR &= ~(1 << 7);
+        rtc_ready = 1;
+    } else {
+        Logger_Log("RTC Init Mode Timeout!");
+    }
     RTC_WPR = 0xFF;
-    rtc_ready = 1;
 }
 
 void ADC_Init(void) {
+    uint32_t timeout;
     RCC_AHB1ENR |= (1 << 0) | (1 << 1); // Enable GPIOA and GPIOB clocks
     RCC_AHB1ENR |= (1 << 22);           // Enable DMA2 clock
     
@@ -297,7 +357,12 @@ void ADC_Init(void) {
 
     /* DMA2 Stream 0 Configuration (ADC1 is on Stream 0 Channel 0 or Stream 4 Channel 0) */
     DMA2_S0CR &= ~(1 << 0);       // Disable DMA Stream 0 to configure
-    while (DMA2_S0CR & (1 << 0)); // Wait for disable
+    timeout = 0xFFFF;
+    while ((DMA2_S0CR & (1 << 0)) && --timeout); // Wait for disable
+    
+    if (timeout == 0) {
+        Logger_Log("ADC DMA Disable Timeout!");
+    }
 
     DMA2_S0PAR = (uint32_t)&ADC1_DR;
     DMA2_S0M0AR = (uint32_t)adc_results;
@@ -493,6 +558,12 @@ uint32_t Get_SystemClock(void) {
     return 16000000;
 }
 
+void uart_putc(char c);
+
+void uart_puts(const char *s) {
+    while (*s) uart_putc(*s++);
+}
+
 void SystemClock_Config_96MHz(void) {
     /* 1. Try to enable HSE */
     RCC_CR |= (1 << 16); // HSEON
@@ -513,7 +584,10 @@ void SystemClock_Config_96MHz(void) {
 
     /* 4. Enable PLL */
     RCC_CR |= (1 << 24); // PLLON
-    while (!(RCC_CR & (1 << 25)));
+    timeout = 1000000;
+    while (!(RCC_CR & (1 << 25)) && --timeout);
+    
+    if (timeout == 0) return;
 
     /* 5. Set Prescalers */
     RCC_CFGR &= ~((0xF << 4) | (0x7 << 10) | (0x7 << 13));
@@ -522,7 +596,8 @@ void SystemClock_Config_96MHz(void) {
     /* 6. Switch to PLL */
     RCC_CFGR &= ~3;
     RCC_CFGR |= 2;
-    while (((RCC_CFGR >> 2) & 3) != 2);
+    timeout = 1000000;
+    while (((RCC_CFGR >> 2) & 3) != 2 && --timeout);
 }
 
 void USART1_Init_Baud(uint32_t f_clk) {
@@ -554,15 +629,14 @@ void USART1_Init_96MHz(void) {
 }
 
 void uart_putc(char c) {
+    /* Clear errors if any (ORE, NE, FE, PE) */
+    if (USART1_SR & 0xF) {
+        volatile uint32_t dummy = USART1_SR;
+        dummy = USART1_DR;
+        (void)dummy;
+    }
     while (!(USART1_SR & (1 << 7)));
     USART1_DR = c;
-}
-
-int _write(int file, char *ptr, int len) {
-    for (int i = 0; i < len; i++) {
-        uart_putc(ptr[i]);
-    }
-    return len;
 }
 
 char rx_buffer[32];
@@ -614,13 +688,32 @@ void Process_UART(void) {
 int main(void) {
     /* 1. Hardware abstraction and basic config */
     FPU_Enable();
+    
+    /* LED Setup for debugging */
+    RCC_AHB1ENR |= (1 << 2);
+    GPIOC_MODER &= ~(3 << (13 * 2));
+    GPIOC_MODER |=  (1 << (13 * 2));
+    GPIOC_ODR &= ~(1 << 13); // LED ON
+    
+    /* Initialize USART at 16MHz (HSI) first to log early progress */
+    USART1_Init_16MHz();
+    Logger_Log("\r\n--- System Boot (Early) ---");
+    
     Detect_ResetReason();
+    Logger_Log("Reset Reason: %s", reset_reason);
 
     /* 2. System Clock Configuration to 96MHz (Critical) */
+    Logger_Log("Switching System Clock to 96MHz...");
+    uart_wait_tx_complete();
+
     SystemClock_Config_96MHz();
     
-    /* 3. Initialize Peripherals at final frequency */
+    /* Small delay for clock stabilization */
+    for (volatile int i = 0; i < 200000; i++);
+
+    /* 3. Re-initialize Peripherals at final frequency */
     USART1_Init_96MHz();
+    Logger_Log("System Clock stabilized at 96MHz.");
     
     /* 4. Small delay for hardware stabilization */
     for (volatile int i = 0; i < 100000; i++);
@@ -631,6 +724,7 @@ int main(void) {
     Logger_Log("Reset Reason: %s", reset_reason);
 
     /* 6. High-level feature initialization */
+    Logger_Log("Initializing System Components...");
     STK_LOAD = 96000000 / 1000 - 1;
     STK_VAL = 0;
     STK_CTRL = 0x07;
@@ -641,35 +735,43 @@ int main(void) {
     PWM_Init();
     CRC_Init();
 
+    GPIOC_ODR |= (1 << 13); // LED OFF (Initialization Complete)
+    Logger_Log("Initialization Complete.");
+
     Log_ClockConfiguration();
     Benchmark_CRC();
     Benchmark_DSP();
-
-    /* 7. IO Setup */
-    RCC_AHB1ENR |= (1 << 2);
-    GPIOC_MODER &= ~(3 << (13 * 2));
-    GPIOC_MODER |=  (1 << (13 * 2));
 
     uint32_t last_status = 0;
     while (1) {
         Process_UART();
         
-        if ((ms_ticks - last_status) >= 5000) {
+        uint32_t current_ticks = ms_ticks;
+        if ((current_ticks - last_status) >= 5000) {
+            last_status = current_ticks;
             GPIOC_ODR ^= (1 << 13);
-            Logger_Log("--- Periodic Status ---");
-            Log_ClockConfiguration();
+            
             int32_t temp_mc = ADC_ReadTemp();
-            Logger_Log("CPU Temp: %ld.%03ld C", temp_mc / 1000, temp_mc % 1000);
+            uint32_t freq = Measure_SystemClock();
             
-            char adc_msg[128];
-            char *p = adc_msg;
-            p += sprintf(p, "ADC: ");
+            char status_buf[512];
+            char *p = status_buf;
+            p += sprintf(p, "--- Periodic Status ---\r\n");
+            
+            uint32_t sws = (RCC_CFGR >> 2) & 0x3;
+            const char* sws_str = (sws == 0) ? "HSI" : (sws == 1) ? "HSE" : (sws == 2) ? "PLL" : "Unknown";
+            p += sprintf(p, "  System Clock: %s | Measured: ", sws_str);
+            if (freq > 0) p += sprintf(p, "%lu.%03lu MHz\r\n", freq / 1000000, (freq % 1000000) / 1000);
+            else p += sprintf(p, "[Syncing...]\r\n");
+            
+            p += sprintf(p, "  CPU Temp: %ld.%03ld C\r\n", temp_mc / 1000, temp_mc % 1000);
+            
+            p += sprintf(p, "  ADC Channels: ");
             for (int i = 0; i < 10; i++) {
-                p += sprintf(p, "CH%d:%u ", i, ADC_Read(i));
+                p += sprintf(p, "CH%d:%lu ", i, ADC_Read(i));
             }
-            Logger_Log("%s", adc_msg);
             
-            last_status = ms_ticks;
+            Logger_Log("%s", status_buf);
         }
     }
 }
