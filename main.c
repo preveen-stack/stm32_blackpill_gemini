@@ -1205,6 +1205,26 @@ void Handle_I2S_Command(char *cmd) {
     }
 }
 
+void Handle_PWM_Command(char *cmd) {
+    if (strcmp(cmd, "PWM") == 0) {
+        Logger_Log("PWM1: TIM1_CH1 on PA8");
+        Logger_Log("Type 'PWM SET <0-100>' to change duty cycle.");
+    } else if (strcmp(cmd, "PWM INIT") == 0) {
+        PWM_Init();
+        Logger_Log("PWM1 (TIM1) Initialized on PA8.");
+    } else if (strncmp(cmd, "PWM SET ", 8) == 0) {
+        uint32_t duty = atoi(cmd + 8);
+        if (duty > 100) duty = 100;
+        PWM_SetDutyCycle((uint16_t)duty);
+        Logger_Log("PWM1 Duty Cycle set to %lu%%", duty);
+    } else {
+        Logger_Log("PWM Commands:");
+        Logger_Log("  PWM        : Show pin info");
+        Logger_Log("  PWM INIT   : Initialize PWM");
+        Logger_Log("  PWM SET <d> : Set duty cycle (0-100)");
+    }
+}
+
 void Handle_SPI_Command(char *cmd) {
     if (strcmp(cmd, "SPI") == 0) {
         Logger_Log("SPI1: SCK=PA5, MISO=PA6, MOSI=PA7, CS=PA4");
@@ -1249,6 +1269,7 @@ void Print_Help(void) {
     Logger_Log("  LSM    : LSM303 sub-commands");
     Logger_Log("  SPI    : SPI sub-commands");
     Logger_Log("  I2S    : I2S sub-commands");
+    Logger_Log("  PWM    : PWM sub-commands");
     Logger_Log("  PINOUT : Show Blackpill pinout diagram");
     Logger_Log("  ROLL   : Toggle periodic status updates");
     Logger_Log("  RESET  : Perform a standard software reset");
@@ -1311,6 +1332,8 @@ void Process_UART(void) {
                 Handle_SPI_Command(rx_buffer);
             } else if (strncmp(rx_buffer, "I2S", 3) == 0) {
                 Handle_I2S_Command(rx_buffer);
+            } else if (strncmp(rx_buffer, "PWM", 3) == 0) {
+                Handle_PWM_Command(rx_buffer);
             } else if (strcmp(rx_buffer, "ROLL") == 0) {
                 rolling_status = !rolling_status;
                 Logger_Log("Periodic Status: %s", rolling_status ? "ENABLED" : "DISABLED");
