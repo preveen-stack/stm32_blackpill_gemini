@@ -1135,32 +1135,39 @@ void Handle_I2C_Command(char *cmd) {
 }
 
 void I2S2_Init(void) {
-    /* 1. Enable SPI2 clock and GPIOB clock */
-    RCC_APB1ENR |= (1 << 14); // SPI2EN
-    RCC_AHB1ENR |= (1 << 1);  // GPIOBEN
+    /* 1. Enable SPI2 clock, GPIOB clock and Power Interface */
+    RCC_APB1ENR |= (1 << 14) | (1 << 28); // SPI2EN, PWREN
+    RCC_AHB1ENR |= (1 << 1);              // GPIOBEN
 
     /* 2. Configure PB12 (WS), PB13 (CK), PB15 (SD) as AF5 */
     GPIOB_MODER &= ~((3 << (12 * 2)) | (3 << (13 * 2)) | (3 << (15 * 2)));
     GPIOB_MODER |=  ((2 << (12 * 2)) | (2 << (13 * 2)) | (2 << (15 * 2)));
-    
-    /* AFRH for pins 12, 13, 15: AF5 */
     *(volatile uint32_t *)(GPIOB_BASE + 0x24) &= ~((0xF << (4 * 4)) | (0xF << (5 * 4)) | (0xF << (7 * 4)));
     *(volatile uint32_t *)(GPIOB_BASE + 0x24) |=  ((5 << (4 * 4)) | (5 << (5 * 4)) | (5 << (7 * 4)));
 
-    /* 3. I2S Configuration (44.1kHz, 16-bit) */
-    /* PCLK1 is 48MHz. I2S clock usually comes from PLLI2S, but on F411 we use system clock.
-       Fs = f(I2SCLK) / [2 * (16 * 2) * ( (2 * I2SDIV) + ODD)]
-       For 44.1kHz from 96MHz: DIV=34, ODD=0 roughly.
+    /* 3. Configure I2S Clock (PLLI2S)
+       We want ~44.1kHz. Fs = f(VCO) / [N * 2 * 32 * DIV]
+       Default VCO is 16MHz (HSI) or 25MHz (HSE). 
+       Let's use HSI as source. 
     */
-    SPI2_I2SPR = (0 << 8) | 34; // ODD=0, DIV=34
-    
-    /* I2SMOD=1, I2SCFG=10 (Master Transmit), I2SSTD=00 (Phillips), DATLEN=00 (16-bit) */
-    SPI2_I2SCFGR = (1 << 11) | (2 << 8) | (1 << 10); // I2SMOD, Master TX, SPE
+    #define RCC_PLLI2SCFGR (*(volatile uint32_t *)(RCC_BASE + 0x84))
+    /* PLLI2SN = 192, PLLI2SR = 2. VCO = 1MHz * 192 = 192MHz. f(I2S) = 192 / 2 = 96MHz. */
+    RCC_PLLI2SCFGR = (192 << 6) | (2 << 28); 
+    RCC_CR |= (1 << 26); // PLLI2SON
+    uint32_t timeout = 1000000;
+    while (!(RCC_CR & (1 << 27)) && --timeout); // PLLI2SRDY
+
+    /* 4. I2S Configuration (44.1kHz, 16-bit) 
+       I2SDIV = f(I2S) / [2 * 32 * Fs] = 96MHz / (64 * 44100) = 34.01 -> 34
+    */
+    SPI2_I2SPR = (0 << 8) | 34; 
+    SPI2_I2SCFGR = (1 << 11) | (2 << 8) | (1 << 10); // I2SMOD, Master TX, I2SE
 }
 
 void I2S2_Write(uint16_t data) {
-    while (!(SPI2_SR & (1 << 1))); // Wait for TXE
-    SPI2_DR = data;
+    uint32_t timeout = 100000;
+    while (!(SPI2_SR & (1 << 1)) && --timeout); // Wait for TXE
+    if (timeout > 0) SPI2_DR = data;
 }
 
 void Handle_I2S_Command(char *cmd) {
