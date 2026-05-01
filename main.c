@@ -1241,6 +1241,7 @@ void Print_Help(void) {
     Logger_Log("  MCP    : MCP23017 sub-commands");
     Logger_Log("  LSM    : LSM303 sub-commands");
     Logger_Log("  SPI    : SPI sub-commands");
+    Logger_Log("  I2S    : I2S sub-commands");
     Logger_Log("  PINOUT : Show Blackpill pinout diagram");
     Logger_Log("  ROLL   : Toggle periodic status updates");
     Logger_Log("  RESET  : Perform a standard software reset");
@@ -1301,6 +1302,8 @@ void Process_UART(void) {
                 Handle_LSM_Command(rx_buffer);
             } else if (strncmp(rx_buffer, "SPI", 3) == 0) {
                 Handle_SPI_Command(rx_buffer);
+            } else if (strncmp(rx_buffer, "I2S", 3) == 0) {
+                Handle_I2S_Command(rx_buffer);
             } else if (strcmp(rx_buffer, "ROLL") == 0) {
                 rolling_status = !rolling_status;
                 Logger_Log("Periodic Status: %s", rolling_status ? "ENABLED" : "DISABLED");
