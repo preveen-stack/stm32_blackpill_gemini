@@ -942,6 +942,8 @@ void LSM303_ReadMag(void) {
     }
 }
 
+int rolling_lsm = 0;
+
 void Handle_LSM_Command(char *cmd) {
     if (strcmp(cmd, "LSM INIT") == 0) {
         LSM303_Init();
@@ -949,11 +951,15 @@ void Handle_LSM_Command(char *cmd) {
         LSM303_ReadAcc();
     } else if (strcmp(cmd, "LSM MAG") == 0) {
         LSM303_ReadMag();
+    } else if (strcmp(cmd, "LSM ROLL") == 0) {
+        rolling_lsm = !rolling_lsm;
+        Logger_Log("LSM Periodic Read: %s", rolling_lsm ? "ENABLED" : "DISABLED");
     } else {
         Logger_Log("LSM Commands:");
         Logger_Log("  LSM INIT : Initialize sensor");
         Logger_Log("  LSM ACC  : Read Accelerometer");
         Logger_Log("  LSM MAG  : Read Magnetometer");
+        Logger_Log("  LSM ROLL : Toggle periodic readings");
     }
 }
 
@@ -1156,6 +1162,7 @@ int main(void) {
     Benchmark_DSP();
 
     uint32_t last_status = 0;
+    uint32_t last_lsm = 0;
     while (1) {
         Process_UART();
         
@@ -1163,10 +1170,19 @@ int main(void) {
         Measure_SystemClock();
         
         uint32_t current_ticks = ms_ticks;
+        
+        /* Periodic System Status (5s) */
         if (rolling_status && (current_ticks - last_status) >= 5000) {
             last_status = current_ticks;
             GPIOC_ODR ^= (1 << 13);
             Report_Status();
+        }
+
+        /* Periodic LSM303 Read (1s) */
+        if (rolling_lsm && (current_ticks - last_lsm) >= 1000) {
+            last_lsm = current_ticks;
+            LSM303_ReadAcc();
+            LSM303_ReadMag();
         }
     }
 }
