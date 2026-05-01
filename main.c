@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
+#include <ctype.h>
 
 /* Register addresses */
 #define RCC_BASE        0x40023800
@@ -922,9 +923,9 @@ void LSM303_ReadAcc(void) {
         int16_t x = (int16_t)(data[0] | (data[1] << 8));
         int16_t y = (int16_t)(data[2] | (data[3] << 8));
         int16_t z = (int16_t)(data[4] | (data[5] << 8));
-        Logger_Log("LSM303 Accel: X=%d Y=%d Z=%d", x, y, z);
+        Logger_Log("[0x19] LSM303 Accel: X=%d Y=%d Z=%d", x, y, z);
     } else {
-        Logger_Log("LSM303 Accel Read Failed");
+        Logger_Log("[0x19] LSM303 Accel Read Failed");
     }
 }
 
@@ -936,9 +937,9 @@ void LSM303_ReadMag(void) {
         int16_t x = (int16_t)((data[0] << 8) | data[1]);
         int16_t z = (int16_t)((data[2] << 8) | data[3]);
         int16_t y = (int16_t)((data[4] << 8) | data[5]);
-        Logger_Log("LSM303 Mag: X=%d Y=%d Z=%d", x, y, z);
+        Logger_Log("[0x1E] LSM303 Mag: X=%d Y=%d Z=%d", x, y, z);
     } else {
-        Logger_Log("LSM303 Mag Read Failed");
+        Logger_Log("[0x1E] LSM303 Mag Read Failed");
     }
 }
 
@@ -956,9 +957,9 @@ void Handle_LSM_Command(char *cmd) {
         Logger_Log("LSM Periodic Read: %s", rolling_lsm ? "ENABLED" : "DISABLED");
     } else {
         Logger_Log("LSM Commands:");
-        Logger_Log("  LSM INIT : Initialize sensor");
-        Logger_Log("  LSM ACC  : Read Accelerometer");
-        Logger_Log("  LSM MAG  : Read Magnetometer");
+        Logger_Log("  LSM INIT : Initialize sensor (0x19/0x1E)");
+        Logger_Log("  LSM ACC  : Read Accelerometer (0x19)");
+        Logger_Log("  LSM MAG  : Read Magnetometer (0x1E)");
         Logger_Log("  LSM ROLL : Toggle periodic readings");
     }
 }
@@ -1048,6 +1049,11 @@ void Process_UART(void) {
             if (rx_index == 0) continue;
             rx_buffer[rx_index] = '\0';
             
+            /* Convert command to Uppercase for case-insensitivity */
+            for (int i = 0; i < rx_index; i++) {
+                rx_buffer[i] = (char)toupper((unsigned char)rx_buffer[i]);
+            }
+            
             if (rx_index == 15 && rx_buffer[0] == 'T') {
                 /* RTC Sync logic unchanged */
                 int y, mon, d, h, m, s;
@@ -1095,8 +1101,8 @@ void Process_UART(void) {
                 Logger_Log("Unknown Command: %s. Type 'HELP' for list.", rx_buffer);
             }
             rx_index = 0;
-        } else if (rx_index < 31) {
-            /* Echo character back (basic terminal behavior) */
+        } else if (rx_index < 31 && isprint((unsigned char)c)) {
+            /* Echo character back */
             uart_putc(c);
             rx_buffer[rx_index++] = c;
         }
