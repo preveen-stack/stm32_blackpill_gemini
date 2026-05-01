@@ -403,21 +403,19 @@ int32_t ADC_ReadTemp(void) {
     return temp_mc;
 }
 
-void I2C1_Init(void) {
+uint32_t i2c_current_freq = 100000;
+
+void I2C1_Init_Freq(uint32_t freq) {
     /* 1. Enable I2C1 and GPIOB clocks */
     RCC_APB1ENR |= (1 << 21); // I2C1EN
     RCC_AHB1ENR |= (1 << 1);  // GPIOBEN
 
     /* 2. Configure PB6 (SCL) and PB7 (SDA) as Alternate Function Open-Drain */
-    /* MODER: AF (2) */
     GPIOB_MODER &= ~((3 << (6 * 2)) | (3 << (7 * 2)));
     GPIOB_MODER |=  ((2 << (6 * 2)) | (2 << (7 * 2)));
-    /* OTYPER: Open-Drain (1) */
     *(volatile uint32_t *)(GPIOB_BASE + 0x04) |= (1 << 6) | (1 << 7);
-    /* PUPDR: Pull-up (1) */
     *(volatile uint32_t *)(GPIOB_BASE + 0x0C) &= ~((3 << (6 * 2)) | (3 << (7 * 2)));
     *(volatile uint32_t *)(GPIOB_BASE + 0x0C) |=  ((1 << (6 * 2)) | (1 << (7 * 2)));
-    /* AFR: AF4 (I2C1) */
     *(volatile uint32_t *)(GPIOB_BASE + 0x20) &= ~(0xFF << (6 * 4));
     *(volatile uint32_t *)(GPIOB_BASE + 0x20) |=  (0x44 << (6 * 4));
 
@@ -428,11 +426,22 @@ void I2C1_Init(void) {
     /* Program peripheral input clock frequency (PCLK1 is 48MHz) */
     I2C1_CR2 = 48; 
     
-    /* Standard mode 100kHz: CCR = PCLK / (2 * 100000) = 48MHz / 200000 = 240 */
-    I2C1_CCR = 240;
-    I2C1_TRISE = 49; // 1000ns / (1 / 48MHz) + 1 = 48 + 1
+    if (freq <= 100000) {
+        /* Standard mode 100kHz: CCR = PCLK / (2 * 100000) = 48MHz / 200000 = 240 */
+        I2C1_CCR = 240;
+        I2C1_TRISE = 49;
+    } else {
+        /* Fast mode 400kHz: Duty 2 (1/3), CCR = PCLK / (3 * 400000) = 48MHz / 1.2MHz = 40 */
+        I2C1_CCR = (1 << 15) | (0 << 14) | 40; // F/S bit | Duty | CCR
+        I2C1_TRISE = 15; // 300ns / (1 / 48MHz) + 1 = 14.4 + 1
+    }
     
-    I2C1_CR1 |= (1 << 0); // PE: Peripheral Enable
+    I2C1_CR1 |= (1 << 0); // PE
+    i2c_current_freq = freq;
+}
+
+void I2C1_Init(void) {
+    I2C1_Init_Freq(100000);
 }
 
 int I2C1_Start(void) {
@@ -988,7 +997,9 @@ void Handle_LSM_Command(char *cmd) {
 
 void Print_I2C_Help(void) {
     Logger_Log("\r\n--- I2C Commands ---");
-    Logger_Log("  I2C        : Show I2C pin info");
+    Logger_Log("  I2C        : Show I2C pin info and current frequency");
+    Logger_Log("  I2C FREQ <100000|400000> : Set I2C frequency");
+    Logger_Log("  I2C AUTO   : Try 400kHz, fallback to 100kHz if none found");
     Logger_Log("  I2C DETECT : Scan I2C1 bus for devices");
     Logger_Log("  I2C READ <addr> <len> : Read data from device");
     Logger_Log("  I2C WRITE <addr> <b1> [b2...] : Write data to device");
@@ -998,10 +1009,33 @@ void Print_I2C_Help(void) {
 
 void Handle_I2C_Command(char *cmd) {
     if (strcmp(cmd, "I2C") == 0) {
-        Logger_Log("I2C1 available on PB6 (SCL) and PB7 (SDA).");
-        Logger_Log("Type 'I2C DETECT' to scan the bus.");
+        Logger_Log("I2C1 on PB6 (SCL), PB7 (SDA) at %lu Hz", i2c_current_freq);
+        Logger_Log("Type 'I2C DETECT' to scan.");
     } else if (strcmp(cmd, "I2C DETECT") == 0) {
         I2C1_Scan();
+    } else if (strncmp(cmd, "I2C FREQ ", 9) == 0) {
+        uint32_t f;
+        if (sscanf(cmd + 9, "%lu", &f) == 1) {
+            I2C1_Init_Freq(f);
+            Logger_Log("I2C frequency set to %lu Hz", i2c_current_freq);
+        }
+    } else if (strcmp(cmd, "I2C AUTO") == 0) {
+        Logger_Log("Auto-configuring I2C bus...");
+        I2C1_Init_Freq(400000);
+        int found = 0;
+        for (uint8_t a = 1; a < 127; a++) {
+            if (I2C1_Start()) {
+                if (I2C1_SendAddr(a << 1)) found++;
+                I2C1_Stop();
+            }
+        }
+        if (found) {
+            Logger_Log("I2C Fast Mode (400kHz) OK. Found %d devices.", found);
+        } else {
+            Logger_Log("No devices at 400kHz, falling back to 100kHz...");
+            I2C1_Init_Freq(100000);
+            I2C1_Scan();
+        }
     } else if (strncmp(cmd, "I2C READ ", 9) == 0) {
         uint32_t addr, len;
         if (sscanf(cmd + 9, "%lx %lu", &addr, &len) == 2) {
