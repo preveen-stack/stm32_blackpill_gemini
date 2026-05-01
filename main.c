@@ -15,6 +15,7 @@
 #define PWR_BASE        0x40007000
 #define RTC_BASE        0x40002800
 #define I2C1_BASE       0x40005400
+#define SPI1_BASE       0x40013000
 
 /* I2C Registers */
 #define I2C1_CR1        (*(volatile uint32_t *)(I2C1_BASE + 0x00))
@@ -24,6 +25,12 @@
 #define I2C1_SR2        (*(volatile uint32_t *)(I2C1_BASE + 0x18))
 #define I2C1_CCR        (*(volatile uint32_t *)(I2C1_BASE + 0x1C))
 #define I2C1_TRISE      (*(volatile uint32_t *)(I2C1_BASE + 0x20))
+
+/* SPI Registers */
+#define SPI1_CR1        (*(volatile uint32_t *)(SPI1_BASE + 0x00))
+#define SPI1_CR2        (*(volatile uint32_t *)(SPI1_BASE + 0x04))
+#define SPI1_SR         (*(volatile uint32_t *)(SPI1_BASE + 0x08))
+#define SPI1_DR         (*(volatile uint32_t *)(SPI1_BASE + 0x0C))
 
 /* RCC Registers */
 #define RCC_CR          (*(volatile uint32_t *)(RCC_BASE + 0x00))
@@ -929,6 +936,43 @@ void Handle_MCP_Command(char *cmd) {
     }
 }
 
+void SPI1_Init(void) {
+    /* 1. Enable SPI1 and GPIOA clocks */
+    RCC_APB2ENR |= (1 << 12); // SPI1EN
+    RCC_AHB1ENR |= (1 << 0);  // GPIOAEN
+
+    /* 2. Configure PA5(SCK), PA6(MISO), PA7(MOSI) as AF5 */
+    GPIOA_MODER &= ~((3 << (5 * 2)) | (3 << (6 * 2)) | (3 << (7 * 2)));
+    GPIOA_MODER |=  ((2 << (5 * 2)) | (2 << (6 * 2)) | (2 << (7 * 2)));
+    
+    /* AFR: AF5 (SPI1) */
+    *(volatile uint32_t *)(GPIOA_BASE + 0x20) &= ~(0xFFF << (5 * 4));
+    *(volatile uint32_t *)(GPIOA_BASE + 0x20) |=  (0x555 << (5 * 4));
+
+    /* 3. Configure PA4 as GPIO Output for software CS */
+    GPIOA_MODER &= ~(3 << (4 * 2));
+    GPIOA_MODER |=  (1 << (4 * 2));
+    *(volatile uint32_t *)(GPIOA_BASE + 0x14) |= (1 << 4); // CS High
+
+    /* 4. SPI Configuration */
+    /* BR[2:0]: fPCLK/64 = 96MHz/64 = 1.5MHz. CPOL=0, CPHA=0, MSTR=1, SPE=1 */
+    SPI1_CR1 = (5 << 3) | (1 << 2) | (1 << 6); // BR=64, MSTR, SPE
+    /* SSM=1, SSI=1 (Software Slave Management) */
+    SPI1_CR1 |= (1 << 9) | (1 << 8);
+}
+
+void SPI1_CS(int level) {
+    if (level) *(volatile uint32_t *)(GPIOA_BASE + 0x14) |=  (1 << 4);
+    else       *(volatile uint32_t *)(GPIOA_BASE + 0x14) &= ~(1 << 4);
+}
+
+uint8_t SPI1_Transfer(uint8_t data) {
+    SPI1_DR = data;
+    uint32_t timeout = 0xFFFF;
+    while (!(SPI1_SR & (1 << 0)) && --timeout); // Wait for RXNE
+    return (uint8_t)SPI1_DR;
+}
+
 void LSM303_Init(void) {
     /* Accelerometer: 0x19 */
     /* CTRL_REG1_A: 50Hz, all axes enabled */
@@ -1081,6 +1125,38 @@ void Handle_I2C_Command(char *cmd) {
     }
 }
 
+void Handle_SPI_Command(char *cmd) {
+    if (strcmp(cmd, "SPI") == 0) {
+        Logger_Log("SPI1: SCK=PA5, MISO=PA6, MOSI=PA7, CS=PA4");
+        Logger_Log("Type 'SPI INIT' to enable.");
+    } else if (strcmp(cmd, "SPI INIT") == 0) {
+        SPI1_Init();
+        Logger_Log("SPI1 Initialized at 1.5MHz.");
+    } else if (strncmp(cmd, "SPI CS ", 7) == 0) {
+        int level = atoi(cmd + 7);
+        SPI1_CS(level);
+        Logger_Log("SPI1 CS set to %d", level);
+    } else if (strncmp(cmd, "SPI XFER ", 9) == 0) {
+        char *p = cmd + 9;
+        int n;
+        uint32_t val;
+        char msg[128]; char *out = msg;
+        out += sprintf(out, "SPI XFER Rx: ");
+        while (sscanf(p, "%lx%n", &val, &n) == 1) {
+            uint8_t rx = SPI1_Transfer((uint8_t)val);
+            out += sprintf(out, "%02X ", rx);
+            p += n;
+        }
+        Logger_Log("%s", msg);
+    } else {
+        Logger_Log("SPI Commands:");
+        Logger_Log("  SPI        : Show pin info");
+        Logger_Log("  SPI INIT   : Initialize SPI1");
+        Logger_Log("  SPI CS <0|1> : Control PA4 CS pin");
+        Logger_Log("  SPI XFER <hex1> [hex2...] : Transfer bytes");
+    }
+}
+
 void Print_Help(void) {
     Logger_Log("\r\n--- Available Commands ---");
     Logger_Log("  HELP   : Show this help message");
@@ -1091,6 +1167,7 @@ void Print_Help(void) {
     Logger_Log("  I2C    : I2C sub-commands (Type I2C for info)");
     Logger_Log("  MCP    : MCP23017 sub-commands");
     Logger_Log("  LSM    : LSM303 sub-commands");
+    Logger_Log("  SPI    : SPI sub-commands");
     Logger_Log("  PINOUT : Show Blackpill pinout diagram");
     Logger_Log("  ROLL   : Toggle periodic status updates");
     Logger_Log("  RESET  : Perform a standard software reset");
@@ -1149,6 +1226,8 @@ void Process_UART(void) {
                 Handle_MCP_Command(rx_buffer);
             } else if (strncmp(rx_buffer, "LSM", 3) == 0) {
                 Handle_LSM_Command(rx_buffer);
+            } else if (strncmp(rx_buffer, "SPI", 3) == 0) {
+                Handle_SPI_Command(rx_buffer);
             } else if (strcmp(rx_buffer, "ROLL") == 0) {
                 rolling_status = !rolling_status;
                 Logger_Log("Periodic Status: %s", rolling_status ? "ENABLED" : "DISABLED");
