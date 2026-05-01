@@ -287,14 +287,16 @@ void RTC_Init(void) {
             rtc_ready = 1;
             return;
         }
-        Logger_Log("RTC enabled but not ticking, resetting Backup Domain...");
+        Logger_Log("RTC enabled but stalled, resetting Backup Domain...");
         RCC_BDCR |= (1 << 16);
         RCC_BDCR &= ~(1 << 16);
+        /* Small delay for stabilization after reset */
+        for (volatile int i = 0; i < 100000; i++);
     }
 
     /* 1. Try to enable LSI */
     RCC_CSR |= (1 << 0); // LSION
-    uint32_t timeout = 0xFFFF;
+    uint32_t timeout = 0x3FFFF; // More patient timeout
     while (!(RCC_CSR & (1 << 1)) && --timeout);
 
     /* 2. Configure Backup Domain */
@@ -308,12 +310,12 @@ void RTC_Init(void) {
     
     /* Wait for RSF */
     RTC_ISR &= ~(1 << 5);
-    timeout = 0xFFFF;
+    timeout = 0x3FFFF;
     while (!(RTC_ISR & (1 << 5)) && --timeout);
 
     /* Enter Init Mode */
     RTC_ISR |= (1 << 7);
-    timeout = 0xFFFF;
+    timeout = 0x3FFFF;
     while (!(RTC_ISR & (1 << 6)) && --timeout);
     
     if (timeout > 0) {
@@ -746,13 +748,15 @@ int main(void) {
     while (1) {
         Process_UART();
         
+        /* Advance the frequency measurement state machine */
+        uint32_t freq = Measure_SystemClock();
+        
         uint32_t current_ticks = ms_ticks;
         if ((current_ticks - last_status) >= 5000) {
             last_status = current_ticks;
             GPIOC_ODR ^= (1 << 13);
             
             int32_t temp_mc = ADC_ReadTemp();
-            uint32_t freq = Measure_SystemClock();
             
             char status_buf[512];
             char *p = status_buf;
