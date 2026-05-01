@@ -13,6 +13,16 @@
 #define USART1_BASE     0x40011000
 #define PWR_BASE        0x40007000
 #define RTC_BASE        0x40002800
+#define I2C1_BASE       0x40005400
+
+/* I2C Registers */
+#define I2C1_CR1        (*(volatile uint32_t *)(I2C1_BASE + 0x00))
+#define I2C1_CR2        (*(volatile uint32_t *)(I2C1_BASE + 0x04))
+#define I2C1_DR         (*(volatile uint32_t *)(I2C1_BASE + 0x10))
+#define I2C1_SR1        (*(volatile uint32_t *)(I2C1_BASE + 0x14))
+#define I2C1_SR2        (*(volatile uint32_t *)(I2C1_BASE + 0x18))
+#define I2C1_CCR        (*(volatile uint32_t *)(I2C1_BASE + 0x1C))
+#define I2C1_TRISE      (*(volatile uint32_t *)(I2C1_BASE + 0x20))
 
 /* RCC Registers */
 #define RCC_CR          (*(volatile uint32_t *)(RCC_BASE + 0x00))
@@ -392,32 +402,120 @@ int32_t ADC_ReadTemp(void) {
     return temp_mc;
 }
 
-void PWM_Init(void) {
-    /* 1. Enable TIM1 and GPIOA clocks */
-    RCC_APB2ENR |= (1 << 0); // TIM1EN
-    RCC_AHB1ENR |= (1 << 0); // GPIOAEN
+void I2C1_Init(void) {
+    /* 1. Enable I2C1 and GPIOB clocks */
+    RCC_APB1ENR |= (1 << 21); // I2C1EN
+    RCC_AHB1ENR |= (1 << 1);  // GPIOBEN
 
-    /* 2. Configure PA8 as Alternate Function AF1 (TIM1_CH1) */
-    GPIOA_MODER &= ~(3 << (8 * 2));
-    GPIOA_MODER |=  (2 << (8 * 2)); // AF mode
-    GPIOA_AFRH  &= ~(0xF << (0 * 4)); // Clear AF for PA8
-    GPIOA_AFRH  |=  (1 << (0 * 4));   // AF1
+    /* 2. Configure PB6 (SCL) and PB7 (SDA) as Alternate Function Open-Drain */
+    /* MODER: AF (2) */
+    GPIOB_MODER &= ~((3 << (6 * 2)) | (3 << (7 * 2)));
+    GPIOB_MODER |=  ((2 << (6 * 2)) | (2 << (7 * 2)));
+    /* OTYPER: Open-Drain (1) */
+    *(volatile uint32_t *)(GPIOB_BASE + 0x04) |= (1 << 6) | (1 << 7);
+    /* PUPDR: Pull-up (1) */
+    *(volatile uint32_t *)(GPIOB_BASE + 0x0C) &= ~((3 << (6 * 2)) | (3 << (7 * 2)));
+    *(volatile uint32_t *)(GPIOB_BASE + 0x0C) |=  ((1 << (6 * 2)) | (1 << (7 * 2)));
+    /* AFR: AF4 (I2C1) */
+    *(volatile uint32_t *)(GPIOB_BASE + 0x20) &= ~(0xFF << (6 * 4));
+    *(volatile uint32_t *)(GPIOB_BASE + 0x20) |=  (0x44 << (6 * 4));
 
-    /* 3. Configure TIM1 for PWM 
-       Frequency = 96MHz / (0+1) / (255+1) = 375kHz
-    */
-    TIM1_PSC = 0;
-    TIM1_ARR = 255;
-    TIM1_CCR1 = 0;           // Initial Duty Cycle = 0%
+    /* 3. I2C Configuration */
+    I2C1_CR1 = (1 << 15); // SWRST
+    I2C1_CR1 = 0;
+    
+    /* Program peripheral input clock frequency (PCLK1 is 48MHz) */
+    I2C1_CR2 = 48; 
+    
+    /* Standard mode 100kHz: CCR = PCLK / (2 * 100000) = 48MHz / 200000 = 240 */
+    I2C1_CCR = 240;
+    I2C1_TRISE = 49; // 1000ns / (1 / 48MHz) + 1 = 48 + 1
+    
+    I2C1_CR1 |= (1 << 0); // PE: Peripheral Enable
+}
 
-    /* PWM mode 1, preload enable */
-    TIM1_CCMR1 = (6 << 4) | (1 << 3); 
-    /* Enable output on CH1 */
-    TIM1_CCER |= (1 << 0);
-    /* MOE: Main Output Enable (Required for TIM1) */
-    TIM1_BDTR |= (1 << 15);
-    /* Enable counter */
-    TIM1_CR1 |= (1 << 0);
+int I2C1_Start(void) {
+    I2C1_CR1 |= (1 << 8); // START
+    uint32_t timeout = 0xFFFF;
+    while (!(I2C1_SR1 & (1 << 0)) && --timeout); // SB
+    return (timeout > 0);
+}
+
+void I2C1_Stop(void) {
+    I2C1_CR1 |= (1 << 9); // STOP
+}
+
+int I2C1_SendAddr(uint8_t addr) {
+    I2C1_DR = addr;
+    uint32_t timeout = 0xFFFF;
+    while (!(I2C1_SR1 & (1 << 1)) && --timeout); // ADDR
+    if (timeout == 0) return 0;
+    (void)I2C1_SR2; // Clear ADDR flag
+    return 1;
+}
+
+int I2C1_WriteByte(uint8_t data) {
+    uint32_t timeout = 0xFFFF;
+    while (!(I2C1_SR1 & (1 << 7)) && --timeout); // TXE
+    if (timeout == 0) return 0;
+    I2C1_DR = data;
+    while (!(I2C1_SR1 & (1 << 2)) && --timeout); // BTF
+    return (timeout > 0);
+}
+
+uint8_t I2C1_ReadByte(int ack) {
+    if (ack) I2C1_CR1 |= (1 << 10);
+    else I2C1_CR1 &= ~(1 << 10);
+    
+    uint32_t timeout = 0xFFFF;
+    while (!(I2C1_SR1 & (1 << 6)) && --timeout); // RXNE
+    return (uint8_t)I2C1_DR;
+}
+
+int I2C1_Write(uint8_t dev_addr, uint8_t *data, uint32_t len) {
+    if (!I2C1_Start()) return 0;
+    if (!I2C1_SendAddr(dev_addr << 1)) { I2C1_Stop(); return 0; }
+    for (uint32_t i = 0; i < len; i++) {
+        if (!I2C1_WriteByte(data[i])) { I2C1_Stop(); return 0; }
+    }
+    I2C1_Stop();
+    return 1;
+}
+
+int I2C1_Read(uint8_t dev_addr, uint8_t *data, uint32_t len) {
+    if (!I2C1_Start()) return 0;
+    if (!I2C1_SendAddr((dev_addr << 1) | 1)) { I2C1_Stop(); return 0; }
+    for (uint32_t i = 0; i < len; i++) {
+        data[i] = I2C1_ReadByte(i < (len - 1));
+    }
+    I2C1_Stop();
+    return 1;
+}
+
+void I2C1_Scan(void) {
+    Logger_Log("Scanning I2C1 bus (PB6=SCL, PB7=SDA)...");
+    Logger_Log("     0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f");
+    for (uint8_t i = 0; i < 128; i += 16) {
+        char line[128]; char *p = line;
+        p += sprintf(p, "%02x: ", i);
+        for (uint8_t j = 0; j < 16; j++) {
+            uint8_t addr = i + j;
+            if (I2C1_Start()) {
+                if (I2C1_SendAddr(addr << 1)) {
+                    p += sprintf(p, "%02x ", addr);
+                } else {
+                    p += sprintf(p, "-- ");
+                }
+                I2C1_Stop();
+                /* Clear flags if any */
+                (void)I2C1_SR1; (void)I2C1_SR2;
+            } else {
+                p += sprintf(p, "?? ");
+            }
+            for (volatile int k = 0; k < 1000; k++); // Small gap
+        }
+        Logger_Log("%s", line);
+    }
 }
 
 void PWM_SetDutyCycle(uint16_t duty) {
@@ -506,6 +604,34 @@ void Benchmark_DSP(void) {
     } else {
         Logger_Log("DSP Validation: FAILED!");
     }
+}
+
+void PWM_Init(void) {
+    /* 1. Enable TIM1 and GPIOA clocks */
+    RCC_APB2ENR |= (1 << 0); // TIM1EN
+    RCC_AHB1ENR |= (1 << 0); // GPIOAEN
+
+    /* 2. Configure PA8 as Alternate Function AF1 (TIM1_CH1) */
+    GPIOA_MODER &= ~(3 << (8 * 2));
+    GPIOA_MODER |=  (2 << (8 * 2)); // AF mode
+    GPIOA_AFRH  &= ~(0xF << (0 * 4)); // Clear AF for PA8
+    GPIOA_AFRH  |=  (1 << (0 * 4));   // AF1
+
+    /* 3. Configure TIM1 for PWM 
+       Frequency = 96MHz / (0+1) / (255+1) = 375kHz
+    */
+    TIM1_PSC = 0;
+    TIM1_ARR = 255;
+    TIM1_CCR1 = 0;           // Initial Duty Cycle = 0%
+
+    /* PWM mode 1, preload enable */
+    TIM1_CCMR1 = (6 << 4) | (1 << 3); 
+    /* Enable output on CH1 */
+    TIM1_CCER |= (1 << 0);
+    /* MOE: Main Output Enable (Required for TIM1) */
+    TIM1_BDTR |= (1 << 15);
+    /* Enable counter */
+    TIM1_CR1 |= (1 << 0);
 }
 
 uint32_t CRC_Hardware(uint32_t *data, uint32_t len) {
@@ -706,6 +832,66 @@ void Print_Pinout(void) {
     Logger_Log("      '--------------------'");
 }
 
+void Print_I2C_Help(void) {
+    Logger_Log("\r\n--- I2C Commands ---");
+    Logger_Log("  I2C        : Show I2C pin info");
+    Logger_Log("  I2C DETECT : Scan I2C1 bus for devices");
+    Logger_Log("  I2C READ <addr> <len> : Read data from device");
+    Logger_Log("  I2C WRITE <addr> <b1> [b2...] : Write data to device");
+    Logger_Log("  (Addresses and bytes are in hex)");
+}
+
+void Handle_I2C_Command(char *cmd) {
+    if (strcmp(cmd, "I2C") == 0) {
+        Logger_Log("I2C1 available on PB6 (SCL) and PB7 (SDA).");
+        Logger_Log("Type 'I2C DETECT' to scan the bus.");
+    } else if (strcmp(cmd, "I2C DETECT") == 0) {
+        I2C1_Scan();
+    } else if (strncmp(cmd, "I2C READ ", 9) == 0) {
+        uint32_t addr, len;
+        if (sscanf(cmd + 9, "%lx %lu", &addr, &len) == 2) {
+            if (len > 32) len = 32;
+            uint8_t data[32];
+            if (I2C1_Read((uint8_t)addr, data, len)) {
+                char msg[128]; char *p = msg;
+                p += sprintf(p, "Read %lu bytes from 0x%02lx: ", len, addr);
+                for (uint32_t i = 0; i < len; i++) p += sprintf(p, "%02x ", data[i]);
+                Logger_Log("%s", msg);
+            } else {
+                Logger_Log("I2C Read Failed at address 0x%02lx", addr);
+            }
+        } else {
+            Logger_Log("Usage: I2C READ <addr_hex> <len_dec>");
+        }
+    } else if (strncmp(cmd, "I2C WRITE ", 10) == 0) {
+        /* Simple hex parser for write */
+        char *p = cmd + 10;
+        uint32_t addr;
+        int n;
+        if (sscanf(p, "%lx%n", &addr, &n) == 1) {
+            p += n;
+            uint8_t data[32];
+            uint32_t len = 0;
+            uint32_t val;
+            while (len < 32 && sscanf(p, "%lx%n", &val, &n) == 1) {
+                data[len++] = (uint8_t)val;
+                p += n;
+            }
+            if (len > 0) {
+                if (I2C1_Write((uint8_t)addr, data, len)) {
+                    Logger_Log("Wrote %lu bytes to 0x%02lx", len, addr);
+                } else {
+                    Logger_Log("I2C Write Failed at address 0x%02lx", addr);
+                }
+            } else {
+                Logger_Log("Usage: I2C WRITE <addr_hex> <b1_hex> [b2_hex...]");
+            }
+        }
+    } else {
+        Print_I2C_Help();
+    }
+}
+
 void Print_Help(void) {
     Logger_Log("\r\n--- Available Commands ---");
     Logger_Log("  HELP   : Show this help message");
@@ -713,6 +899,7 @@ void Print_Help(void) {
     Logger_Log("  CLOCK  : Show clock configuration");
     Logger_Log("  TEMP   : Show CPU temperature");
     Logger_Log("  ADC    : Show ADC readings");
+    Logger_Log("  I2C    : I2C sub-commands (Type I2C for info)");
     Logger_Log("  PINOUT : Show Blackpill pinout diagram");
     Logger_Log("  ROLL   : Toggle periodic status updates");
     Logger_Log("  RESET  : Perform a software reset");
@@ -759,6 +946,8 @@ void Process_UART(void) {
                 Logger_Log("%s", adc_msg);
             } else if (strcmp(rx_buffer, "PINOUT") == 0) {
                 Print_Pinout();
+            } else if (strncmp(rx_buffer, "I2C", 3) == 0) {
+                Handle_I2C_Command(rx_buffer);
             } else if (strcmp(rx_buffer, "ROLL") == 0) {
                 rolling_status = !rolling_status;
                 Logger_Log("Periodic Status: %s", rolling_status ? "ENABLED" : "DISABLED");
@@ -822,6 +1011,7 @@ int main(void) {
 
     RTC_Init();
     ADC_Init();
+    I2C1_Init();
     DWT_Init();
     PWM_Init();
     CRC_Init();
