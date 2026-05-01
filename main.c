@@ -680,6 +680,32 @@ void Report_Status(void) {
     Logger_Log("%s", status_buf);
 }
 
+void Print_Pinout(void) {
+    Logger_Log("\r\n--- STM32F411 Blackpill Pinout ---");
+    Logger_Log("      .--------------------.");
+    Logger_Log("  B12 | [ ]            [ ] | B10");
+    Logger_Log("  B13 | [ ]            [ ] | B2");
+    Logger_Log("  B14 | [ ]            [ ] | B1");
+    Logger_Log("  B15 | [ ]            [ ] | B0");
+    Logger_Log("   A8 | [ ]            [ ] | A7");
+    Logger_Log("   A9 | [TX1]          [ ] | A6");
+    Logger_Log("  A10 | [RX1]          [ ] | A5");
+    Logger_Log("  A11 | [ ]            [ ] | A4");
+    Logger_Log("  A12 | [ ]            [ ] | A3");
+    Logger_Log("  A15 | [ ]            [ ] | A2");
+    Logger_Log("   B3 | [ ]            [ ] | A1");
+    Logger_Log("   B4 | [ ]            [ ] | A0");
+    Logger_Log("   B5 | [ ]            [ ] | C15");
+    Logger_Log("   B6 | [ ]            [ ] | C14");
+    Logger_Log("   B7 | [ ]       [LED]| C13");
+    Logger_Log("   B8 | [ ]            [ ] | VB");
+    Logger_Log("   B9 | [ ]            [ ] | 3V3");
+    Logger_Log("   5V | [ ]            [ ] | GND");
+    Logger_Log("  GND | [ ]            [ ] | 5V");
+    Logger_Log("  3V3 | [ ]            [ ] | 3V3");
+    Logger_Log("      '--------------------'");
+}
+
 void Print_Help(void) {
     Logger_Log("\r\n--- Available Commands ---");
     Logger_Log("  HELP   : Show this help message");
@@ -687,6 +713,7 @@ void Print_Help(void) {
     Logger_Log("  CLOCK  : Show clock configuration");
     Logger_Log("  TEMP   : Show CPU temperature");
     Logger_Log("  ADC    : Show ADC readings");
+    Logger_Log("  PINOUT : Show Blackpill pinout diagram");
     Logger_Log("  ROLL   : Toggle periodic status updates");
     Logger_Log("  RESET  : Perform a software reset");
     Logger_Log("  TYYYYMMDDHHMMSS : Sync RTC time");
@@ -730,6 +757,8 @@ void Process_UART(void) {
                     if (i == 4) p += sprintf(p, "\r\n  ");
                 }
                 Logger_Log("%s", adc_msg);
+            } else if (strcmp(rx_buffer, "PINOUT") == 0) {
+                Print_Pinout();
             } else if (strcmp(rx_buffer, "ROLL") == 0) {
                 rolling_status = !rolling_status;
                 Logger_Log("Periodic Status: %s", rolling_status ? "ENABLED" : "DISABLED");
